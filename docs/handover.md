@@ -68,7 +68,7 @@ MLProject/
 ├── submission/                  # v2 产物
 ├── submission_v3/               # 当前 no-regime v3 产物
 ├── submission_v4_NoRegime/      # 当前 no-regime v4 产物
-└── validation/                  # 验证与辅助脚本
+└── validation/                  # 验证与辅助脚本，并不重要，agent可以按需取用
 ```
 
 ---
