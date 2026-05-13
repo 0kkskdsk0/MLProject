@@ -79,35 +79,8 @@ MLProject/
 - `execute_notebook_locally.py`
   本地直接执行 notebook，不依赖 `nbconvert`
 
-## 4. 快速开始
 
-建议在仓库根目录运行以下命令。
-
-### 运行 v3 稳定 baseline
-
-```powershell
-python code\train_predict_v3_fast.py
-```
-
-预期输出：
-
-- `submission_v3/pred_simple.csv`
-- `submission_v3/pred_complex.csv`
-- `submission_v3/model.pkl`
-
-### 运行当前 v4 主线版本
-
-```powershell
-python code\train_predict_v4_NoRegime.py
-```
-
-预期输出：
-
-- `submission_v4_NoRegime/pred_simple.csv`
-- `submission_v4_NoRegime/pred_complex.csv`
-- `submission_v4_NoRegime/model.pkl`
-
-## 5. 环境依赖
+## 4. 环境依赖
 
 当前代码中可见的主要依赖包括：
 
@@ -126,7 +99,7 @@ pip install pandas numpy scikit-learn xgboost lightgbm matplotlib
 
 如果你要运行 notebook 生成或展示流程，可能还需要补充 Jupyter 相关包。
 
-## 6. 当前版本建议
+## 5. 当前版本建议
 
 如果你是第一次接手这个仓库，建议按下面顺序理解和使用：
 
@@ -148,7 +121,7 @@ pip install pandas numpy scikit-learn xgboost lightgbm matplotlib
 - `v4_Regime(ErrorVersion)`
   历史实验保留版本，不建议默认当作可交付主线
 
-## 7. 当前结果摘要
+## 6. 当前结果摘要
 
 详细指标请看 `docs/metric.md` 和 `docs/v4result.md`。这里仅保留最关键的版本结论。
 
@@ -168,7 +141,7 @@ pip install pandas numpy scikit-learn xgboost lightgbm matplotlib
 - `submission_v4_NoRegime/pred_simple.csv`：857 / 25,647 预测为异常
 - `submission_v4_NoRegime/pred_complex.csv`：643 / 34,542 预测为异常
 
-## 8. 输出文件说明
+## 7. 输出文件说明
 
 训练脚本运行完成后，会生成以下文件：
 
@@ -181,7 +154,7 @@ pip install pandas numpy scikit-learn xgboost lightgbm matplotlib
 - `pred_simple.csv` 和 `pred_complex.csv` 只应包含一列：`y_pred`
 - `model.pkl` 保存训练好的模型、阈值、特征列和部分复现所需元数据
 
-## 9. 推荐阅读顺序
+## 8. 推荐阅读顺序
 
 如果你想快速进入项目，建议这样看：
 
