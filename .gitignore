@@ -1,0 +1,43 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.conda/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Temporary experiment outputs
+submission_tmp/
+submission_debug*/
+submission_experiment*/
+runs/
+outputs/
+artifacts/
+checkpoints/
+
+# Validation scratch outputs
+validation/*tmp*.csv
+validation/*debug*.csv
+validation/*scratch*.csv
