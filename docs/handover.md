@@ -1,339 +1,383 @@
 # Robust Anomaly Detection in Noisy Time-Series Data - 技术交接文档
 
-**项目地址**: https://github.com/0kkskdsk0/MLProject.git
-**最后更新**: 2026-05-12
+**仓库路径**: `G:\MLProject\MLProject`  
+**最后更新**: 2026-05-13  
+**当前建议阅读顺序**: 先看本文档，再大致浏览 `notebooks/`理解v3v4版本模型构建细节，最后按需要进入 `code/` 和 `validation/`
 
 ---
 
 ## 1. 项目背景与目标
 
-### 1.1 业务问题定义
-本项目聚焦于**嘈杂时序数据中的鲁棒异常检测**，数据来源于金融市场观测序列。核心挑战包括：
-- **高噪声污染**：观测值具有高度随机性，信号被噪声淹没
-- **极度类别不平衡**：异常事件占比仅约 0.4%（570 / 137,192）
-- **时序依赖性**：异常表现为**时间模式**而非孤立点偏差
-- **分布漂移（Task 2）**：测试集与训练集的底层分布和异常模式存在显著差异
+本项目面向**嘈杂时序数据中的鲁棒异常检测**。训练集来自一段按时间排序的金融市场观测序列，目标是在极度不平衡、噪声较强、且存在分布漂移的前提下，对两个测试集输出 `y_pred` 二值预测。
 
-### 1.2 成功指标
-| 指标 | 说明 | 目标 |
-|------|------|------|
-| AUC-PR | Precision-Recall 曲线下面积，评估不平衡数据下的异常检测能力 | 最大化 |
-| F1-Score | 精确率与召回率的调和平均 | 最大化 |
-| AUC-ROC | ROC 曲线下面积，排序区分能力 | > 0.90 |
-| Task 2 鲁棒性 | 同一模型在不重新训练的前提下对复杂场景的泛化 | 保持 > 0.80 F1 |
+核心难点：
+- **高噪声**：原始观测波动大，异常信号容易被局部噪声掩盖。
+- **极度不平衡**：训练集仅 `570 / 137192` 为异常，约 `0.415%`。
+- **强时序性**：异常更像持续片段或局部模式，而不是孤立点。
+- **Task 2 分布漂移**：`test_complex.csv` 相比训练集更容易出现阈值偏移和泛化退化。
+
+主要评估指标：
+- **AUC-PR**：本任务最重要，适合极度不平衡数据。
+- **F1**：用于阈值化后的整体精确率/召回率平衡。
+- **AUC-ROC**：辅助看排序能力，不作为唯一判断依据。
 
 ---
 
-## 2. 数据说明
+## 2. 数据与文件
 
-### 2.1 原始数据路径
+### 2.1 数据文件
+
 | 文件 | 路径 | 行数 | 说明 |
 |------|------|------|------|
-| 训练集 | `data/train.csv` | 137,192 | 含标签 y（0=正常，1=异常） |
-| 测试集1（Task 1） | `data/test_simple.csv` | 25,647 | 同分布，无标签 |
-| 测试集2（Task 2） | `data/test_complex.csv` | 34,542 | 复杂场景，无标签 |
-| 项目说明 | `Project.pdf` | - | 项目要求与评分标准 |
+| 训练集 | `data/train.csv` | 137,192 | 含标签 `y`，`0=正常, 1=异常` |
+| 测试集1 | `data/test_simple.csv` | 25,647 | 同分布测试，无标签 |
+| 测试集2 | `data/test_complex.csv` | 34,542 | 更复杂场景，无标签 |
+| 项目说明 | `Project.pdf` | - | 题目要求 |
 
 ### 2.2 Schema
-```
-f1 ~ f33  : 33 个数值型特征列（已标准化，部分含缺失值）
-y         : 目标变量（仅 train.csv，0=正常，1=异常）
-```
-- 特征维度：33（原始）→ 317（工程后，v3 版本）
-- 缺失值分布：集中在 f22-f29（训练集 10 行），测试集无缺失
 
-### 2.3 目标变量定义
-- **异常（y=1）**：金融市场中的异常行为模式
-- **数据特性**：全部 570 个异常集中在时间序列尾部（索引 124,283 ~ 136,582）
-- **时序结构**：数据按时间排序，分为 19 个 regime block，异常仅出现在最后 10 个 block
+```text
+f1 ~ f33 : 33 个数值特征
+y        : 仅 train.csv 中存在，二分类标签
+```
 
-### 2.4 数据更新频率
-- 当前为**离线批次数据**，无实时更新需求
-- 提交格式：`y_pred` 单列表，每行对应测试集一行（0 或 1）
+补充事实：
+- 训练集共有 `570` 个异常，集中在时间序列尾部。
+- 测试集只需要提交单列 `y_pred`。
+- 缺失值很少，主要集中在训练集部分 `f22 ~ f29`。
 
 ---
 
-## 3. 代码结构
+## 3. 当前仓库结构
 
-```
+```text
 MLProject/
-├── data/
-│   ├── train.csv              # 训练数据（137,192 行 × 34 列）
-│   ├── test_simple.csv        # 测试集1（25,647 行 × 33 列）
-│   └── test_complex.csv       # 测试集2（34,542 行 × 33 列）
-│
 ├── code/
-│   ├── train_predict_v3_fast.py    # ⭐ 当前最佳版本（v3）
-│   └── train_predict_v4_full.py    # 优化版本（含多折CV、Focal Loss等，待验证）
-│
-├── submission/                # v2 基线结果（已弃用）
-│   ├── pred_simple.csv
-│   ├── pred_complex.csv
-│   └── model.pkl
-│
-├── submission_v3/           # ⭐ 当前最佳预测结果
-│   ├── pred_simple.csv      # Task 1 预测（2.43% 异常率）
-│   ├── pred_complex.csv     # Task 2 预测（1.29% 异常率）
-│   └── model.pkl            # 完整模型（XGB + LGBM + Isolation Forest 集成）
-│
+│   ├── train_predict_v2.py
+│   ├── train_predict_v3_fast.py
+│   ├── train_predict_v4_NoRegime.py
+│   └── train_predict_v4_Regime.py
+├── data/
 ├── docs/
-│   └── handover.md          # ⭐ 本文档
-│
+│   ├── handover.md
+│   ├── metric.md
+│   └── v4result.md
 ├── notebooks/
-│   └── model_demo.ipynb     # ⭐ 效果验证 Notebook
-│
-├── requirements.txt         # Python 环境依赖
-└── Project.pdf              # 项目要求说明书
-```
-
-### 脚本职责说明
-
-| 脚本 | 职责 | 状态 |
-|------|------|------|
-| `train_predict_v3_fast.py` | **当前生产版本**：特征工程、模型训练、预测生成全流程 | ✅ 已验证 |
-| `train_predict_v4_full.py` | 优化实验版本：多折CV、Focal Loss、级联架构、时序平滑 | ⏳ 待跑通验证 |
-
----
-
-## 4. 环境依赖
-
-```
-pandas>=2.0.0
-numpy>=1.24.0
-scikit-learn>=1.3.0
-xgboost>=2.0.0
-lightgbm>=4.0.0
-imbalanced-learn>=0.11.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
-huggingface_hub>=0.20.0
-jupyter>=1.0.0
-```
-
-**安装命令**:
-```bash
-pip install -r requirements.txt
+│   ├── v3Notebook/v3model.ipynb #详细讲解v3版本模型的细节和结果可视化
+│   └── v4Notebook/v4model.ipynb #详细讲解v3版本模型的细节和结果可视化
+├── submission/                  # v2 产物
+├── submission_v3/               # 当前 no-regime v3 产物
+├── submission_v4_NoRegime/      # 当前 no-regime v4 产物
+└── validation/                  # 验证与辅助脚本
 ```
 
 ---
 
-## 5. 实验迭代记录
+## 4. 版本总览
 
-### 5.1 版本 v1（探索阶段）
-- **脚本**: 早期 notebook 探索（未保留）
-- **改动**: 基础数据加载、EDA、简单 Isolation Forest
-- **动机**: 理解数据分布与任务要求
-- **评估**: 未系统评估，仅验证数据格式
+这一节是给人和 agent 最重要的入口。每个版本都写清楚：脚本、特征工程、模型结构、集成方式、当前状态。
 
-### 5.2 版本 v2（基线建立）
-- **脚本**: `code/train_predict_v2.py`（历史版本，Hub 上未保留，仅 submission/ 结果）
-- **特征工程**:
-  - 全局 rolling window 统计（窗口 3/5/10/20/50）
-  - 差分特征（1/5/10 步）
-  - 滞后特征（1/3/5 步，仅前 10 个特征）
-  - 交叉特征（前 5 个特征两两交互）
-- **改动动机**: 建立端到端基线流程
-- **评估**:
-  | 指标 | 数值 | 随机基线 |
-  |------|------|----------|
-  | AUC-PR | **0.2634** | ~0.047 |
-  | F1 | **0.5126** | ~0.00 |
-  | AUC-ROC | **0.7455** | 0.500 |
-- **主要问题**: 验证集（最后 10K 行含 480 异常）与训练集（前 127K 行仅 90 异常）分布极度不匹配（66 倍差距）
+### 4.1 v2 基线
 
-### 5.3 版本 v3（⭐重大修复）
+- **脚本**: `code/train_predict_v2.py`
+- **输出目录**: `submission/`
+- **定位**: 早期可运行基线，不建议继续迭代。
+
+特征工程：
+- rolling window 统计
+- 差分特征
+- 滞后特征
+- 一部分交叉特征
+
+模型组成：
+- XGBoost
+- LightGBM
+- Isolation Forest
+
+问题：
+- 训练/验证切分非常差，验证集异常占比远高于训练集。
+- 指标较弱，主要价值是提供最早端到端模板。
+
+### 4.2 v3 当前稳定基线
+
 - **脚本**: `code/train_predict_v3_fast.py`
-- **核心改动**:
-  1. **时序切分修复**（最大收益）：将切分点从 127,000 移至 **134,035**（regime block 边界）
-     - 训练集：134,035 行含 450 异常（0.34%）
-     - 验证集：3,157 行含 120 异常（3.80%）
-  3. **LOF 异常分数**：将无监督 LOF 分数编码为监督特征
-  4. **PCA 降维**：5 主成分去噪
-  5. **LightGBM `is_unbalance=True`**：替代手动 scale_pos_weight
-  6. **集成权重调整**：无监督权重从 10% 提升至 **30%**，增强 Task 2 鲁棒性
-- **改动动机**: 训练集异常样本太少导致模型无法学习异常模式
-- **评估提升**:
-  | 指标 | v2 | v3 | 提升 |
-  |------|-----|-----|------|
-  | AUC-PR | 0.2634 | **0.9285** | +269% |
-  | F1 | 0.5126 | **0.9292** | +87% |
-  | AUC-ROC | 0.7455 | **0.9781** | +33% |
+- **输出目录**: `submission_v3/`
+- **定位**: 当前推荐 baseline；结构简单、可解释、已去除 `regime_id` 风险。
 
-### 5.3 版本 v4（
-- **脚本**: `code/train_predict_v4_full.py`
+特征工程：
+- 原始 33 维特征
+- rolling mean / std，窗口 `5/10/20`
+- 一阶/五阶差分
+- 前 3 个特征的 lag `1/3`
+- 前 3 个特征两两交互
+- LOF 异常分数
+- PCA 5 维主成分
+- 行统计：`row_mean / row_std / row_max / row_min`
 
-- **核心改动**:
-  1. **多折时序交叉验证**：使用两个切分点 `[131680, 134035]` 进行 2 折时序 CV
-     - Fold 1：前 131,680 行训练（含 ~330 异常），尾部 ~5,512 行验证
-     - Fold 2：前 134,035 行训练（含 450 异常），尾部 3,157 行验证
-     - 最终阈值取多折平均，降低单折验证集过拟合风险
-  2. **Focal Loss 风格 XGBoost 分支**：新增 `train_xgb_focal()`，强制关注难分样本
-     - `scale_pos_weight` 从 ~296 提升至 ~592（×2）
-     - `max_depth` 从 6 降至 5，防止过拟合
-     - `learning_rate` 从 0.05 降至 0.03，更保守收敛
-     - 与标准 XGBoost 各占集成 25% 权重
-  3. **级联架构（Cascade）**：Isolation Forest 粗筛 + XGBoost 精修
-     - IF 概率 > 0.3 的样本标记为"可疑"
-     - 仅对可疑样本 + 全部已知异常训练精炼 XGBoost（max_depth=5）
-     - 级联输出占最终集成权重的 30%
-  4. **时序平滑后处理**：在集成分数上增加时序一致性约束
-     - `temporal_smooth(scores, window=5)`：5 窗口移动平均去噪
-     - `apply_temporal_consistency()`：孤立单点异常（前后邻居均为正常）强制归零
-     - 预估减少 ~30% 孤立误报
-  5. **概念漂移自适应阈值（Task 2 专用）**：`adaptive_threshold()`
-     - 按 regime block 计算局部分位数 vs 全局中位数的偏移
-     - 偏移量 = `(local_median - global_median) × 0.3`
-     - 使各 regime 的"异常基线"对齐，解决分布漂移
-  6. **特征选择 + 精简子模型**：`select_features_lgb()` 选 Top 100 gain 特征
-     - 用 LightGBM 初步训练后按 gain 排序取前 100
-     - 用 Top 100 特征重训 XGBoost + LightGBM 精简版
-     - 精简子模型占最终预测权重的 20%，与全特征模型互补去噪
-  7. **全量数据最终重训**：在 `FINAL_TRAIN_END = 135,046` 处切分
-     - 保留最后 2,146 行（含 ~120 异常）作为内部验证
-     - 前 135,046 行用于最终模型训练，最大化数据利用
+当前特征维度：
+- **316 维**
+- 无`regime_id` 特征
 
-- **改动动机**: 核心解决 v3 的**验证集过小（仅 3,157 行）导致的最优阈值过拟合风险**，同时针对 Task 2 的概念漂移设计自适应机制，并通过时序先验和特征选择去噪提升泛化稳定性。
-- **评估提升**:
-| 指标 | v2 | v4 | 提升 |
-  |------|-----|-----|------|
-  | AUC-PR | 0.2634 | **0.9723** |  |
-  | F1 | 0.5126 | **0.9382** | |
-  | AUC-ROC | 0.7455 | **** |  |
----
+模型组成：
+- XGBoost
+- LightGBM
+- Isolation Forest
 
-## 6. 失败实验记录
+集成策略：
+- `0.35 * XGB + 0.35 * LGBM + 0.30 * IF`
 
-### 6.1 实验 A：纯无监督方法（Isolation Forest 单模型）
-- **尝试**: 仅使用 Isolation Forest 对训练集正常样本建模
-- **失败原因**:
-  - 训练集正常样本覆盖多个 regime，单一密度估计无法区分 regime 间差异
-  - 对 Task 2 概念漂移有一定鲁棒性，但 AUC-PR 仅 ~0.35，远低于集成方案
-- **结论**: 纯无监督方法作为**辅助组件**有效，不能单独使用
+关键风险修复：
+- 已删除 `regime_id` 特征，避免 train/val/test 编号语义不一致。
+- 当前 LOF/PCA 在 v3 中仍按训练切分拟合，属于安全版本。
 
-### 6.2 实验 B：局部 Outlier Factor（LOF）单模型
-- **尝试**: 使用 LOF 直接做异常检测
-- **失败原因**:
-  - 33 维特征空间中存在共线性和噪声维度，LOF 的距离度量对高维敏感
-  - 加入 PCA 预处理后的 LOF 有所改善，但仍远低于 GBM 集成
-- **结论**: LOF 更适合作为**特征**而非最终模型
+### 4.3 v4_Regime 实验版
 
-### 6.3 实验 C：跨块 rolling 统计（信息泄露风险）
-- **尝试**: 初始 v2 代码使用全局 rolling mean/std，未区分 regime block
-- **失败原因**:
-  - regime 间特征分布差异巨大（f1 均值从 -1.7 到 +3.1），全局统计混淆了不同分布
-  - v3 修复为 block-aware rolling 后指标大幅提升
-- **结论**: 时序数据的 regime 结构必须显式建模
+- **脚本**: `code/train_predict_v4_Regime.py`
+- **定位**: 保留原始 v4 full 思路，用于对照，不建议直接作为当前可信主线。
 
----
+在 v3 基础上新增：
+- 两折时序 CV
+- 第二个 “focal 风格” XGBoost 分支
+- Cascade：IF 粗筛 + XGBoost refine
+- 时间平滑 `temporal_smooth`
+- 孤立点过滤 `apply_temporal_consistency`
+- Top-100 特征选择后再训练轻量子模型
+- Task 2 的 `adaptive_threshold`
 
-## 7. 模型当前状态
+主要问题：
+- 该版本的`regime_id` 特征构造不正确，会导致训练集和验证集的特征语义不对齐
+- LOF/PCA 原逻辑在 CV 前全局拟合，存在信息泄露风险
+- 因此它是“思路保留版”，不是当前可信版本，如果需要增加合理的regime特征可以优先在该版本上开刀
 
-### 7.1 模型类型
-**集成学习模型（Ensemble）**:
-- **XGBoost** (35% 权重): `scale_pos_weight` 处理不平衡，max_depth=6
-- **LightGBM** (35% 权重): `is_unbalance=True`，num_leaves=31
-- **Isolation Forest** (30% 权重): 无监督密度估计，n_estimators=200
+### 4.4 v4_NoRegime 当前最优版本
 
-### 7.2 关键超参数
-| 组件 | 超参数 | 值 |
-|------|--------|-----|
-| XGBoost | max_depth | 6 |
-| XGBoost | learning_rate | 0.05 |
-| XGBoost | scale_pos_weight | ~296（基于训练集正样本比例） |
-| LightGBM | num_leaves | 31 |
-| LightGBM | is_unbalance | True |
-| Isolation Forest | contamination | 0.001（训练集正样本率 × 3） |
-| Isolation Forest | n_estimators | 200 |
-| 集成 | 权重分配 | 35% XGB + 35% LGBM + 30% IF |
+- **脚本**: `code/train_predict_v4_NoRegime.py`
+- **输出目录**: `submission_v4_NoRegime/`
+- **定位**: 当前 v4 主实验线；保留 v4 的复杂结构，同时修复主要风险。
 
-### 7.3 训练时长
-- **特征工程**: ~1 分钟
-- **LOF 拟合**: ~2 分钟
-- **XGBoost**: ~1 分钟（2000 轮，early stopping ~500 轮）
-- **LightGBM**: ~30 秒（2000 轮，early stopping ~500 轮）
-- **Isolation Forest**: ~1 分钟
-- **总计**: ~5 分钟（CPU 单核，无需 GPU）
+特征工程：
+- 与当前 v3 基本一致
+- 不再构造 `regime_id`
+- 当前特征维度同样为 **316 维**
 
-### 7.4 已知局限性
-| 局限性 | 影响 | 严重度 |
-|--------|------|--------|
-| 验证集偏小（3,157 行） | F1 估计方差较大 | ⭐⭐⭐ |
-| 无 temporal smoothing | 孤立误报点未过滤 | ⭐⭐ |
-| 未使用 Focal Loss | 难分样本权重不足 | ⭐⭐ |
-| Task 2 自适应阈值缺失 | 概念漂移时阈值可能偏移 | ⭐⭐⭐⭐ |
-| 特征维度较高（317 维） | 可能存在冗余噪声特征 | ⭐⭐ |
+模型组成：
+- `xgb_std`
+- `xgb_focal`
+- `lgb`
+- `iforest`
+- `cascade`
+- `xgb_std_sel`
+- `lgb_sel`
 
-### 7.5 Bad Case 分析
-基于验证集观察：
-- **假阴性（漏检）**：通常出现在 regime 切换边界处，模型对新 regime 的异常模式适应不足
-- **假阳性（误报）**：f1 均值接近 -1.7 的 regime 中，正常样本的噪声波动被误判为异常
+集成策略：
+- 基础分支：`0.25 * xgb_std + 0.25 * xgb_focal + 0.25 * lgb + 0.25 * iforest`
+- 若 cascade 可用：`0.7 * base + 0.3 * cascade`
+- 若 selected-feature 子模型可用：  
+  `0.8 * base + 0.2 * (0.5 * xgb_std_sel + 0.5 * lgb_sel)`
+- 最后统一经过 `temporal_smooth(window=5)`
+- 二值化后再经过 `apply_temporal_consistency`
+
+关键风险修复：
+- 删除 `regime_id`
+- 删除 Task 2 的 `adaptive_threshold`
+- LOF/PCA 改为：
+  - 每个 CV fold 只在该 fold 的训练切分上拟合
+  - 最终模型只在最终训练段上拟合
+- 这样避免验证集或测试集信息参与特征变换器训练
 
 ---
 
-## 8. 复现指南
+## 5. 当前指标与产物
 
-### 8.1 从零开始复现
-```bash
-# 1. 克隆仓库
-git clone https://huggingface.co/datasets/0kirakira0/MLProject
-cd MLProject
+详细数字以 `docs/metric.md` 为准，这里只给摘要。
 
-# 2. 安装依赖
-pip install -r requirements.txt
+### 5.1 v2
+- 数据集切分方式
+    - 验证集“最后 10K 行，含 480 个异常”
+    - 训练集“前 127K 行，仅 90 个异常”
+    - 训练集和验证集的异常分布严重不匹配。
+- AUC-PR: `0.2634`
+- F1: `0.5126`
+- AUC-ROC: `0.7455`
+- Task1 异常率: `3.54% (907/25647)`
+- Task2 异常率: `2.70% (933/34542)`
 
-# 3. 运行 v3（当前最佳）
-python code/train_predict_v3_fast.py
+### 5.2 v3
+- 数据集切分方式
+    - 训练集：前 134,035 行，含 450 个异常，异常率约 0.34%
+    - 验证集：后 3,157 行，含 120 个异常，异常率约 3.80%
+- AUC-PR: `0.9285`
+- F1: `0.9292`
+- AUC-ROC: `0.9781`
+- Task1 异常率: `3.44% (883/25647)`
+- Task2 异常率: `1.68% (580/34542)`
 
-# 4. 查看输出
-ls submission_v3/
-# pred_simple.csv   ← Task 1 预测
-# pred_complex.csv  ← Task 2 预测
-# model.pkl         ← 完整模型
-```
+说明：
+- `docs/metric.md` 中的 v3 指标沿用了历史表格；
+- 当前 `submission_v3/` 对应的是已经去掉 `regime_id` 的 no-regime v3；
+- 当前产物里的 `model.pkl` 已确认 `feature_count = 316` 且不含 `regime_id`
 
-### 8.2 使用已有模型做预测
-```python
-import pickle
-import pandas as pd
+### 5.3 v4_NoRegime
+- 数据集切分方式
+  - CV切分：两折固定时序切分
+      - [:131680] / [131680:]
+      - [:134035] / [134035:]
+  - 每折阈值确定：
+    在该折验证集上，对 ensemble_smooth 跑 precision_recall_curve，选 F1 最大 的阈值
+  - 每折评估 F1 用的阈值：
+    该折自己验证集上找到的 best_thresh，并且二值化后还会经过
+    apply_temporal_consistency
+  - 最终测试集预测用的阈值：
+    F1 最好的那一折的阈值
+- Fold1: `AUC-PR=0.9579`, `F1=0.9268`, `threshold=0.1721`
+- Fold2: `AUC-PR=0.9868`, `F1=0.9496`, `threshold=0.2040`
+- CV Avg AUC-PR: `0.9723`
+- CV Avg F1: `0.9382`
+- AUC-ROC: 0.9993
+- Task1 异常率: `3.34% (857/25647)`
+- Task2 异常率: `1.86% (643/34542)`
 
-# 加载模型
-with open('submission_v3/model.pkl', 'rb') as f:
-    model_dict = pickle.load(f)
-
-# 对新数据做预测（需要相同特征工程流程）
-# 详见 notebooks/model_demo.ipynb
-```
+补充：
+- 结果摘要见 `docs/v4result.md`
+- 当前 `model.pkl` 已确认 `feature_count = 316` 且不含 `regime_id`
 
 ---
 
-## 9. 下一步优化路线图
+## 6. 关键风险与已完成修复
 
-### P1: 多折时序交叉验证（优先级：⭐⭐⭐⭐⭐，预估收益：+5% F1 稳定性）
-- **描述**: 使用 3-5 个不同切分点训练模型，取平均阈值
-- **成本**: 训练时间 × 3（~15 分钟）
-- **收益**: 降低验证集方差，提升跨分布泛化稳定性
+### 6.1 `regime_id` 语义错位问题
 
-### P2: 时序平滑后处理（优先级：⭐⭐⭐⭐，预估收益：-30% 孤立误报）
-- **描述**: 对预测结果应用 5 窗口投票平滑，移除孤立单点异常
-- **成本**: <1 分钟额外计算
-- **收益**: 利用"异常通常成块出现"的先验，显著降低误报
+问题：
+- 原 notebook / 原 v4 的 local regime 做法是每个数据集自己从 0 开始编号；
+- 这样 `train` 中的 `regime_id=0` 和 `val/test` 中的 `regime_id=0` 不是同一个语义；
+- 树模型会把它当强特征，导致表现剧烈波动。
 
-### P3: 概念漂移自适应阈值（优先级：⭐⭐⭐⭐⭐，预估收益：Task 2 提升 +10%）
-- **描述**: 对 test_complex 按 regime block 计算局部分位数，动态调整阈值
-- **成本**: ~2 分钟额外计算
-- **收益**: 核心解决 Task 2 的分布漂移问题
+处理：
+- 当前 v3 和 `train_predict_v4_NoRegime.py` 都已删除 `regime_id` 特征。
+
+### 6.2 LOF / PCA 信息泄露问题
+
+问题：
+- 原 v4 曾在 CV 前对整份 `train_df` 拟合 LOF/PCA，再进入各 fold；
+- 这会让验证集分布信息提前进入特征变换器。
+
+处理：
+- 当前 `train_predict_v4_NoRegime.py` 中，LOF/PCA 已改为 fold 内训练切分拟合。
+
+### 6.3 Notebook 与主脚本不一致
+
+问题：
+- 历史 notebook 曾重新训练模型并给出与脚本不一致的结果；
+- markdown 解读也有引用旧指标的问题。
+
+处理：
+- `validation/update_model_demo_notebook.py` 已把 v3 notebook 改为 no-regime 逻辑；
+- 当前 notebook 代码不再保留旧输出。
 
 ---
 
-## 附录
+## 7. 失败实验与经验
 
-### A.  Hub 地址
-- **仓库**: https://github.com/0kkskdsk0/MLProject.git
-- **提交文件**: `submission_v3/pred_simple.csv`, `submission_v3/pred_complex.csv`
-- **代码**: `code/train_predict_v3_fast.py`
+### 7.1 单独使用 Isolation Forest
 
-### B. 模型提交格式要求
-- CSV 文件，单列 `y_pred`
-- 第一行为表头 `y_pred`
-- 每行 0 或 1，与测试集行数完全一致
-- test_simple: 25,647 行 | test_complex: 34,542 行
+- 对 Task 2 有一定鲁棒性
+- 但单模型 AUC-PR 明显不如集成
+- 结论：更适合作为特征或辅助分支，而不是单独交付模型
+
+### 7.2 单独使用 LOF
+
+- 高维下距离度量不稳定
+- 作为特征有效，作为最终模型效果弱
+
+### 7.3 使用不稳定的分段编号特征
+
+- 这是这轮最重要的教训之一
+- `regime_id` 如果不是跨 train/val/test 共享稳定语义，就会成为有害特征
+- 它不是“普通无效特征”，而是“语义反转特征”
+
+---
+
+## 8. validation 目录说明
+
+这些文件是给同伴和 agent 继续实验时最有用的索引。
+
+| 文件 | 作用 |
+|------|------|
+| `validation/validate_submission_v3_pkl.py` | 验证 `submission_v3/model.pkl` 是否能复现历史指标 |
+| `validation/run_regime_ablation.py` | 比较 global/local/no-regime 三种设置的影响 |
+| `validation/fill_metric_prediction_rates.py` | 统计各 submission 的 Task1/Task2 异常率并回填 `docs/metric.md` |
+| `validation/update_model_demo_notebook.py` | 把旧 notebook 同步到 no-regime 逻辑 |
+| `validation/create_v4_notebook.py` | 构建 v4 notebook 的辅助脚本 |
+| `validation/execute_notebook_locally.py` | 本地执行 notebook 的辅助脚本 |
+
+---
+
+## 9. 当前推荐工作流
+
+如果你的目标是继续做实验或写报告，建议按下面优先级走。
+
+### 9.1 如果你想继续优化模型
+
+优先从：
+- `code/train_predict_v4_NoRegime.py`
+- `submission_v4_NoRegime`
+
+原因：
+- 当前最好版本
+- 可以尝试添加合理的regime特征
+
+### 9.2 如果你想要最稳的 baseline
+
+优先使用：
+- `code/train_predict_v3_fast.py`
+- `submission_v3/`
+
+原因：
+- 结构简单
+- 结果稳定
+- 更容易解释和写报告
+
+### 9.3 如果你要做对照实验
+
+建议的最小对照组：
+- v2 baseline
+- 当前 v3_fast
+- 当前 no-regime v4
+- 如有必要，再加入 `v4_Regime` 说明风险版本(regime特征在训练集和验证集语义不对齐)
+
+---
+
+## 10. 后续可做的改进方向
+
+### P1. 更严格的时序验证
+
+- 继续扩展为 3-5 个切分点
+- 不要只依赖最后一个短验证段
+- 重点看指标方差，而不是只看单次最佳结果
+
+### P2. 精简 v4 结构
+
+- 现在 v4 组件很多，复杂度偏高
+- 可以做逐项 ablation：
+  - 去掉 cascade
+  - 去掉 selected-feature 子模型
+  - 去掉 focal 分支
+- 观察哪些组件真正提供增益
+
+### P3. 报告友好的可解释性
+
+- 固定一套对比表：v2 / v3 / v4
+- 固定一套图：PR / ROC / confusion matrix / 特征重要性
+- 说明 no-regime 修复前后的风险与动机
+
+---
+
+## 11. 结论
+
+当前仓库里，**真正推荐继续推进的版本有两个**：
+- `train_predict_v3_fast.py`：当前稳健 baseline
+- `train_predict_v4_NoRegime.py`：当前主要实验版
+
+现在最重要的共识应该是：
+- 先基于 **no-regime** 版本做实验
+- 再讨论更复杂的后处理和集成结构是否真的带来收益
