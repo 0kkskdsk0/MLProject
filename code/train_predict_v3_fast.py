@@ -1,6 +1,6 @@
 """
 Robust Anomaly Detection v3 - Fast Version
-Efficient feature engineering with regime awareness, LOF, PCA, improved ensemble
+Efficient feature engineering with LOF, PCA, and improved ensemble
 """
 import pandas as pd
 import numpy as np
@@ -33,7 +33,7 @@ TRAIN_END = 134035
 # ============================================================================
 # FEATURE ENGINEERING (Efficient)
 # ============================================================================
-def create_features_fast(df, regime_ids, feature_cols, lof_model=None, scaler_lof=None):
+def create_features_fast(df, feature_cols, lof_model=None, scaler_lof=None):
     """Fast feature engineering with vectorized operations."""
     features = pd.DataFrame(index=df.index)
     
@@ -57,16 +57,13 @@ def create_features_fast(df, regime_ids, feature_cols, lof_model=None, scaler_lo
         for col in feature_cols[:3]:
             features[f'{col}_l{lag}'] = df[col].shift(lag).bfill().ffill().values
     
-    # 5. Regime ID
-    features['regime_id'] = regime_ids
-    
-    # 6. Feature interactions (top 3)
+    # 5. Feature interactions (top 3)
     for i in range(min(3, len(feature_cols))):
         for j in range(i+1, min(3, len(feature_cols))):
             col1, col2 = feature_cols[i], feature_cols[j]
             features[f'i_{i}_{j}'] = (df[col1] * df[col2]).values
     
-    # 7. LOF scores
+    # 6. LOF scores
     if lof_model is not None:
         X_raw = df[feature_cols].values
         X_scaled = scaler_lof.transform(X_raw)
@@ -75,7 +72,7 @@ def create_features_fast(df, regime_ids, feature_cols, lof_model=None, scaler_lo
     else:
         features['lof_score'] = 0
     
-    # 8. Simple statistical aggregates per row
+    # 7. Simple statistical aggregates per row
     row_data = df[feature_cols].values
     features['row_mean'] = row_data.mean(axis=1)
     features['row_std'] = row_data.std(axis=1)
@@ -105,7 +102,7 @@ def preprocess(df, scaler=None, fit_scaler=False):
         if df[col].isnull().any():
             df[col] = df[col].fillna(df[col].median())
     
-    exclude = ['y', 'regime_id']
+    exclude = ['y']
     feature_cols = [c for c in df.columns if c not in exclude]
     
     if fit_scaler:
@@ -222,24 +219,6 @@ def find_best_threshold(y_true, scores):
     return best_thresh, f1_scores[best_idx]
 
 
-# ============================================================================
-# MAIN
-# ============================================================================
-def detect_regimes(df):
-    f1 = df['f1'].values
-    changes = [0]
-    for i in range(1, len(f1)):
-        if abs(f1[i] - f1[i-1]) > 0.3:
-            changes.append(i)
-    changes.append(len(f1))
-    
-    regime_ids = np.zeros(len(f1), dtype=int)
-    for i in range(len(changes) - 1):
-        start, end = changes[i], changes[i+1]
-        regime_ids[start:end] = i
-    return regime_ids
-
-
 def main():
     print("=" * 70)
     print("ANOMALY DETECTION PIPELINE v3 - Fast")
@@ -260,14 +239,8 @@ def main():
         test_simple_df[col] = test_simple_df[col].fillna(medians[col])
         test_complex_df[col] = test_complex_df[col].fillna(medians[col])
     
-    # Regimes
-    print("\n[2] Detecting regimes...")
-    regime_train = detect_regimes(train_df)
-    regime_simple = detect_regimes(test_simple_df)
-    regime_complex = detect_regimes(test_complex_df)
-    
     # Split
-    print(f"\n[3] Split at {TRAIN_END}")
+    print(f"\n[2] Split at {TRAIN_END}")
     train_raw = train_df.iloc[:TRAIN_END].copy()
     val_raw = train_df.iloc[TRAIN_END:].copy()
     y_train = train_raw['y'].values
@@ -276,7 +249,7 @@ def main():
     print(f"  Val:   {len(val_raw)} rows, {y_val.sum()} anomalies ({y_val.mean()*100:.3f}%)")
     
     # Fit LOF
-    print("\n[4] Fitting LOF...")
+    print("\n[3] Fitting LOF...")
     X_train_sample = train_raw[feature_cols].values
     scaler_lof = StandardScaler()
     X_train_lof = scaler_lof.fit_transform(X_train_sample)
@@ -286,18 +259,18 @@ def main():
     lof_model.fit(X_train_lof[idx])
     
     # Fit PCA
-    print("[5] Fitting PCA...")
+    print("[4] Fitting PCA...")
     pca_scaler = StandardScaler()
     X_train_pca = pca_scaler.fit_transform(X_train_sample)
     pca_model = PCA(n_components=5, random_state=42)
     pca_model.fit(X_train_pca)
     
     # Feature engineering
-    print("\n[6] Feature engineering...")
-    train_fe = create_features_fast(train_raw.drop(columns=['y']), regime_train[:TRAIN_END], feature_cols, lof_model, scaler_lof)
-    val_fe = create_features_fast(val_raw.drop(columns=['y']), regime_train[TRAIN_END:], feature_cols, lof_model, scaler_lof)
-    test_simple_fe = create_features_fast(test_simple_df, regime_simple, feature_cols, lof_model, scaler_lof)
-    test_complex_fe = create_features_fast(test_complex_df, regime_complex, feature_cols, lof_model, scaler_lof)
+    print("\n[5] Feature engineering...")
+    train_fe = create_features_fast(train_raw.drop(columns=['y']), feature_cols, lof_model, scaler_lof)
+    val_fe = create_features_fast(val_raw.drop(columns=['y']), feature_cols, lof_model, scaler_lof)
+    test_simple_fe = create_features_fast(test_simple_df, feature_cols, lof_model, scaler_lof)
+    test_complex_fe = create_features_fast(test_complex_df, feature_cols, lof_model, scaler_lof)
     
     # Add PCA
     train_fe = add_pca(train_fe, train_raw, feature_cols, pca_model, pca_scaler)
@@ -318,7 +291,7 @@ def main():
     print(f"  Features: {len(common_cols)}")
     
     # Scale
-    print("\n[7] Scaling...")
+    print("\n[6] Scaling...")
     train_scaled, scaler = preprocess(train_fe, fit_scaler=True)
     val_scaled = preprocess(val_fe, scaler=scaler)
     test_simple_scaled = preprocess(test_simple_fe, scaler=scaler)
@@ -328,7 +301,7 @@ def main():
     X_val = val_scaled.values
     
     # Train
-    print("\n[8] Training...")
+    print("\n[7] Training...")
     models = {}
     print("  -> XGBoost...")
     models['xgb'] = train_xgboost(X_train, y_train, X_val, y_val)
@@ -338,7 +311,7 @@ def main():
     models['iforest'] = train_isolation_forest(X_train, y_train)
     
     # Validate
-    print("\n[9] Validation...")
+    print("\n[8] Validation...")
     val_scores = ensemble_predict(models, X_val)
     auc_pr = average_precision_score(y_val, val_scores)
     auc_roc = roc_auc_score(y_val, val_scores)
@@ -348,7 +321,7 @@ def main():
     print(f"  AUC-PR: {auc_pr:.4f}, AUC-ROC: {auc_roc:.4f}, F1: {f1_val:.4f} @ {best_thresh:.4f}")
     
     # Predict
-    print("\n[10] Predicting...")
+    print("\n[9] Predicting...")
     scores_simple = ensemble_predict(models, test_simple_scaled.values)
     pred_simple = (scores_simple >= best_thresh).astype(int)
     scores_complex = ensemble_predict(models, test_complex_scaled.values)
@@ -357,7 +330,7 @@ def main():
     print(f"  Task2: {pred_complex.sum()} anomalies ({pred_complex.mean()*100:.2f}%)")
     
     # Save
-    print("\n[11] Saving...")
+    print("\n[10] Saving...")
     pd.DataFrame({'y_pred': pred_simple}).to_csv(f'{OUTPUT_DIR}/pred_simple.csv', index=False)
     pd.DataFrame({'y_pred': pred_complex}).to_csv(f'{OUTPUT_DIR}/pred_complex.csv', index=False)
     with open(f'{OUTPUT_DIR}/model.pkl', 'wb') as f:
