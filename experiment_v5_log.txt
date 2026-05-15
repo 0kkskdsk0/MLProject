@@ -1,0 +1,80 @@
+[11:25:18] Loading data...
+[11:25:18] Train+Val: 134545 rows, 450 anomalies
+[11:25:18] Test:      2647 rows, 120 anomalies
+[11:25:18] Feature engineering...
+[11:25:20] Features: 310 dims
+[11:25:20] Training XGBoost std (A)...
+[0]	train-logloss:0.64512
+[100]	train-logloss:0.00493
+[200]	train-logloss:0.00018
+[300]	train-logloss:0.00006
+[400]	train-logloss:0.00005
+[500]	train-logloss:0.00004
+[600]	train-logloss:0.00004
+[700]	train-logloss:0.00003
+[800]	train-logloss:0.00003
+[900]	train-logloss:0.00003
+[1000]	train-logloss:0.00003
+[1100]	train-logloss:0.00003
+[1200]	train-logloss:0.00003
+[1300]	train-logloss:0.00003
+[1400]	train-logloss:0.00003
+[1500]	train-logloss:0.00003
+[1600]	train-logloss:0.00003
+[1700]	train-logloss:0.00003
+[1800]	train-logloss:0.00003
+[1900]	train-logloss:0.00003
+[1999]	train-logloss:0.00003
+[11:25:38] Training XGBoost focal (B)...
+[0]	train-logloss:1.02694
+[100]	train-logloss:0.04361
+[200]	train-logloss:0.00313
+[300]	train-logloss:0.00035
+[400]	train-logloss:0.00009
+[500]	train-logloss:0.00004
+[600]	train-logloss:0.00003
+[700]	train-logloss:0.00002
+[800]	train-logloss:0.00002
+[900]	train-logloss:0.00002
+[1000]	train-logloss:0.00001
+[1100]	train-logloss:0.00001
+[1200]	train-logloss:0.00001
+[1300]	train-logloss:0.00001
+[1400]	train-logloss:0.00001
+[1499]	train-logloss:0.00001
+[11:25:55] Training LightGBM (C)...
+[11:26:05] Feature selection for D/E...
+[11:26:11] Training XGBoost sel (D)...
+[11:26:22] Training LightGBM sel (E)...
+[11:26:27] Computing predictions...
+[11:26:27] 
+[11:26:27] Evaluating basic configs (no temporal smooth)...
+[11:26:27] Best basic: E8  B+C 0.5+0.5 (AUC-PR=0.9993)
+[11:26:27] 
+[11:26:27] Adding post-processing variants...
+[11:26:27] 
+[11:26:27] ======================================================================
+[11:26:27] FULL RESULTS
+[11:26:27] ======================================================================
+Rank  Exp                                 AUC-PR   Acc     Prec    Recall  F1       FP    FN    Pred   
+-----------------------------------------------------------------------------------------------
+1     E17 E8  B+C 0.5+0.5+nosmooth        0.9993   0.9989  0.9835  0.9917  0.9876   2     1     121/2647
+2     E15 E8  B+C 0.5+0.5+smooth3         0.9981   0.9977  0.9597  0.9917  0.9754   5     1     124/2647
+3     E12 A+B+C 0.2+0.4+0.4               0.9966   0.9977  0.9672  0.9833  0.9752   4     2     122/2647
+4     E2  B (XGB focal)                   0.9965   0.9970  0.9667  0.9667  0.9667   4     4     120/2647
+5     E10 A+B+C 0.34+0.33+0.33            0.9965   0.9977  0.9672  0.9833  0.9752   4     2     122/2647
+6     E8  B+C 0.5+0.5                     0.9964   0.9974  0.9669  0.9750  0.9710   4     3     121/2647
+7     E11 A+B+C 0.5+0.25+0.25             0.9963   0.9970  0.9667  0.9667  0.9667   4     4     120/2647
+8     E6  A+B 0.3+0.7                     0.9963   0.9970  0.9667  0.9667  0.9667   4     4     120/2647
+9     E13 0.8*E10+0.2*sel                 0.9963   0.9970  0.9667  0.9667  0.9667   4     4     120/2647
+10    E4  A+B 0.5+0.5                     0.9962   0.9966  0.9587  0.9667  0.9627   5     4     121/2647
+11    E14 0.8*E4+0.2*sel                  0.9961   0.9966  0.9302  1.0000  0.9639   9     0     129/2647
+12    E9  A+C 0.7+0.3                     0.9960   0.9974  0.9669  0.9750  0.9710   4     3     121/2647
+13    E5  A+B 0.7+0.3                     0.9959   0.9966  0.9664  0.9583  0.9623   4     5     119/2647
+14    E7  A+C 0.5+0.5                     0.9958   0.9966  0.9440  0.9833  0.9633   7     2     125/2647
+15    E1  A (XGB std)                     0.9954   0.9962  0.9297  0.9917  0.9597   9     1     128/2647
+16    E16 E8  B+C 0.5+0.5+smooth7         0.9947   0.9962  0.9661  0.9500  0.9580   4     6     118/2647
+17    E3  C (LGB)                         0.9900   0.9962  0.9231  1.0000  0.9600   10    0     130/2647
+[11:26:27] 
+[11:26:27] Total time: 69s
+[11:26:27] DONE
