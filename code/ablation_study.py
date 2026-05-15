@@ -8,6 +8,7 @@ Only evaluates on Val. Test set is touched once at the end.
 import pandas as pd
 import numpy as np
 import warnings, os, json, pickle, time
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
 from sklearn.ensemble import IsolationForest
@@ -110,7 +111,7 @@ def apply_temporal_consistency(predictions):
     return result
 
 # === MODEL TRAINERS ===
-def train_xgb_standard(X_train, y_train, X_val, y_val, verbosity=0):
+def train_xgb_standard(X_train, y_train, X_val, y_val, verbosity=100):
     dtrain = xgb.DMatrix(X_train, label=y_train)
     dval = xgb.DMatrix(X_val, label=y_val)
     pos_ratio = y_train.mean()
@@ -126,7 +127,7 @@ def train_xgb_standard(X_train, y_train, X_val, y_val, verbosity=0):
                      evals=[(dtrain, 'train'), (dval, 'val')],
                      early_stopping_rounds=100, verbose_eval=verbosity)
 
-def train_xgb_focal(X_train, y_train, X_val, y_val, verbosity=0):
+def train_xgb_focal(X_train, y_train, X_val, y_val, verbosity=100):
     dtrain = xgb.DMatrix(X_train, label=y_train)
     dval = xgb.DMatrix(X_val, label=y_val)
     pos_ratio = y_train.mean()
@@ -142,7 +143,7 @@ def train_xgb_focal(X_train, y_train, X_val, y_val, verbosity=0):
                      evals=[(dtrain, 'train'), (dval, 'val')],
                      early_stopping_rounds=100, verbose_eval=verbosity)
 
-def train_lgb(X_train, y_train, X_val, y_val, verbosity=-1):
+def train_lgb(X_train, y_train, X_val, y_val, verbosity=50):
     train_data = lgb.Dataset(X_train, label=y_train)
     val_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
     params = {
@@ -155,7 +156,7 @@ def train_lgb(X_train, y_train, X_val, y_val, verbosity=-1):
     return lgb.train(params, train_data, num_boost_round=2000,
                      valid_sets=[train_data, val_data],
                      valid_names=['train', 'val'],
-                     callbacks=[lgb.early_stopping(100), lgb.log_evaluation(0)])
+                     callbacks=[lgb.early_stopping(100), lgb.log_evaluation(verbosity)])
 
 def train_iforest(X_train, y_train):
     X_normal = X_train[y_train == 0]
@@ -187,7 +188,7 @@ def train_cascade(X_train, y_train, X_val, y_val):
         'seed': 42, 'tree_method': 'hist',
     }
     model = xgb.train(params, dtrain, num_boost_round=1000,
-                      evals=[(dval, 'val')], early_stopping_rounds=50, verbose_eval=0)
+                      evals=[(dval, 'val')], early_stopping_rounds=50, verbose_eval=50)
     return {'if_model': if_model, 'refine_model': model}
 
 def cascade_predict(cascade, X):
@@ -206,7 +207,8 @@ def select_features_lgb(X_train, y_train, feature_names, max_features=100):
         'learning_rate': 0.05, 'is_unbalance': True,
         'seed': 42, 'verbose': -1,
     }
-    model = lgb.train(params, train_data, num_boost_round=500)
+    model = lgb.train(params, train_data, num_boost_round=500,
+                      callbacks=[lgb.log_evaluation(50)])
     importance = model.feature_importance(importance_type='gain')
     ranked = sorted(zip(feature_names, importance), key=lambda x: x[1], reverse=True)
     return [name for name, _ in ranked[:max_features]]
@@ -293,20 +295,26 @@ def run_experiment(exp, X_train, y_train, X_val, y_val, feature_names):
 
     # Train requested models
     if 'xgb_std' in exp['models']:
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] Training XGBoost standard...")
         trained['xgb_std'] = train_xgb_standard(X_train, y_train, X_val, y_val)
     if 'xgb_focal' in exp['models']:
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] Training XGBoost focal...")
         trained['xgb_focal'] = train_xgb_focal(X_train, y_train, X_val, y_val)
     if 'lgb' in exp['models']:
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] Training LightGBM...")
         trained['lgb'] = train_lgb(X_train, y_train, X_val, y_val)
     if 'iforest' in exp['models']:
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] Training Isolation Forest...")
         trained['iforest'] = train_iforest(X_train, y_train)
     if 'cascade' in exp['models']:
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] Training Cascade...")
         trained['cascade'] = train_cascade(X_train, y_train, X_val, y_val)
     if 'sel' in exp['models']:
         trained['sel_xgb'] = None   # trained later if needed
         trained['sel_lgb'] = None
 
     # Build ensemble prediction on Val
+    print(f"    [{datetime.now().strftime('%H:%M:%S')}] Building ensemble prediction...")
     if exp['name'] == 'E8_full_v4':
         # Full v4 ensemble logic
         pred_xgb_std = predict_xgb(trained['xgb_std'], X_val)
@@ -317,7 +325,7 @@ def run_experiment(exp, X_train, y_train, X_val, y_val, feature_names):
         pred_cascade = cascade_predict(trained['cascade'], X_val)
         if pred_cascade is not None:
             base = 0.7 * base + 0.3 * pred_cascade
-        # Feature selection sub-models
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] Feature selection + retrain...")
         selected_names = select_features_lgb(X_train, y_train, feature_names, max_features=100)
         selected_idx = [feature_names.index(n) for n in selected_names]
         X_train_sel = X_train[:, selected_idx]
@@ -417,14 +425,19 @@ def main():
     print(f"  Features: {len(feature_names)} dims")
 
     # Run experiments
+    total_exp = len(EXPERIMENTS)
     print("\n[3] Running experiments...")
     all_results = []
     all_trained = {}
-    for exp in EXPERIMENTS:
-        print(f"\n  {exp['name']}: {exp['desc']}")
+    for idx, exp in enumerate(EXPERIMENTS):
+        now = datetime.now().strftime('%H:%M:%S')
+        print(f"\n{'='*60}")
+        print(f"  [{idx+1}/{total_exp}] {exp['name']}: {exp['desc']}  ({now})")
+        print(f"{'='*60}")
         result, trained = run_experiment(exp, X_train, y_train, X_val, y_val, feature_names)
         all_results.append(result)
         all_trained[exp['name']] = trained
+        print(f"  >>> Done [{idx+1}/{total_exp}] | AUC-PR={result['auc_pr']:.4f} F1={result['f1']:.4f} ({result['time']:.0f}s)")
 
     # Summary
     print("\n" + "=" * 70)
@@ -502,21 +515,28 @@ def main():
             return temporal_smooth(scores, window=5)
 
     final_models = {}
+    print(f"\n  [{datetime.now().strftime('%H:%M:%S')}] Retraining final model...")
     if 'xgb_std' in [m for e in EXPERIMENTS if e['name'] == best['name'] for m in e['models']] \
        or best['name'] == 'E8_full_v4':
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] XGBoost standard...")
         final_models['xgb_std'] = train_xgb_standard(X_full, full_y, X_full, full_y)
     if 'xgb_focal' in [m for e in EXPERIMENTS if e['name'] == best['name'] for m in e['models']] \
        or best['name'] == 'E8_full_v4':
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] XGBoost focal...")
         final_models['xgb_focal'] = train_xgb_focal(X_full, full_y, X_full, full_y)
     if 'lgb' in [m for e in EXPERIMENTS if e['name'] == best['name'] for m in e['models']] \
        or best['name'] == 'E8_full_v4':
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] LightGBM...")
         final_models['lgb'] = train_lgb(X_full, full_y, X_full, full_y)
+    print(f"    [{datetime.now().strftime('%H:%M:%S')}] IForest...")
     final_models['iforest'] = train_iforest(X_full, full_y)
     if 'cascade' in [m for e in EXPERIMENTS if e['name'] == best['name'] for m in e['models']] \
        or best['name'] == 'E8_full_v4':
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] Cascade...")
         final_models['cascade'] = train_cascade(X_full, full_y, X_full, full_y)
     if 'sel' in [m for e in EXPERIMENTS if e['name'] == best['name'] for m in e['models']] \
        or best['name'] == 'E8_full_v4':
+        print(f"    [{datetime.now().strftime('%H:%M:%S')}] Feature selection...")
         sel_names = select_features_lgb(X_full, full_y, feature_names, max_features=100)
         sel_idx = [feature_names.index(n) for n in sel_names]
         X_full_sel = X_full[:, sel_idx]
