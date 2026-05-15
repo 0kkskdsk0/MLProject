@@ -9,11 +9,13 @@
 ```
 MLProject/
 ├── code/
-│   └── experiment_v5.py       # 训练脚本（消融实验 + 最终模型）
+│   ├── experiment_v5.py       # 消融实验脚本（17组配置对比）
+│   ├── train_final.py         # 【最终模型】训练 + 保存
+│   └── predict_final.py       # 【最终模型】加载模型 → 推理输出
 ├── data/                      # 原始数据
 ├── docs/
 │   └── experiment_v5_report.md # 最终实验报告（含完整分析）
-├── submission_v5/             # 输出产物目录
+├── submission_v5/             # 输出产物（model.pkl + 预测结果）
 ├── experiment_v5_log.txt      # 训练日志
 ├── Project.pdf                # 题目说明
 └── README.md
@@ -37,12 +39,36 @@ MLProject/
 
 ## 使用
 
+### 快速推理（已有 model.pkl）
+
 ```bash
-cd MLProject
+python code/predict_final.py
+```
+
+### 从头训练 + 推理
+
+```bash
+python code/train_final.py      # 训练并保存模型
+python code/predict_final.py    # 加载模型，输出预测
+```
+
+### 完整消融实验（17组配置对比）
+
+```bash
 python code/experiment_v5.py
 ```
 
 依赖: `pandas numpy scikit-learn xgboost lightgbm`
+
+## 输出
+
+运行 `predict_final.py` 后，`submission_v5/` 目录下生成：
+
+| 文件 | 说明 |
+|------|------|
+| `model.pkl` | 训练好的模型 + scaler + 阈值 |
+| `pred_simple.csv` | test_simple 预测结果（仅 `y_pred` 列） |
+| `pred_complex.csv` | test_complex 预测结果（仅 `y_pred` 列） |
 
 ## 核心结论
 
