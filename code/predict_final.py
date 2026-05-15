@@ -1,25 +1,25 @@
 """
 E15: XGBoost Focal + 时序平滑窗口 3
-最终模型推理脚本。
+自测脚本：在 train/val/test 三集上评估模型准确率。
 
 用法:
     python code/predict_final.py
 
 输入:
     submission_v5/model.pkl  — 由 train_final.py 生成
-    data/test_simple.csv
-    data/test_complex.csv
+    data/train.csv
 
 输出:
-    submission_v5/pred_simple.csv   — 仅含 y_pred 列
-    submission_v5/pred_complex.csv
+    终端打印三集完整指标
 """
 import pandas as pd, numpy as np, warnings, pickle, os, time
 warnings.filterwarnings('ignore')
+from sklearn.metrics import (accuracy_score, precision_score, recall_score,
+                             f1_score, average_precision_score)
 import xgboost as xgb
 
 MODEL_PATH = 'submission_v5/model.pkl'
-OUTPUT_DIR = 'submission_v5'
+S1, S2 = 130816, 134545
 
 def log(msg):
     print(f'[{time.strftime("%H:%M:%S")}] {msg}', flush=True)
@@ -36,10 +36,7 @@ fcols = art['fcols']
 threshold = art['threshold']
 smooth_window = art.get('smooth_window', 3)
 
-log(f'Config: {art.get("config", "E15")}')
-log(f'Threshold = {threshold:.4f}, smooth = {smooth_window}')
-
-# === 2. 特征工程（必须与训练完全一致）===
+# === 2. 特征工程 ===
 def mkfe(df, fcols):
     fe = pd.DataFrame(index=df.index)
     for c in fcols:
@@ -67,32 +64,44 @@ def temporal_smooth(s, w):
     k = np.ones(w) / w
     return np.convolve(s, k, mode='same')
 
-def predict_file(csv_path, output_path, label):
-    log(f'Processing {label}...')
-    df = pd.read_csv(csv_path)
+# === 3. 加载数据并切分 ===
+log('Loading data...')
+df = pd.read_csv('data/train.csv')
+for c in fcols:
+    df[c] = df[c].fillna(df[fcols].median())
 
-    # 确保 test 集也有训练时见过的 fcols，缺失列补 0
-    for c in fcols:
-        if c not in df.columns:
-            df[c] = 0.0
+splits = [
+    ('Train', df.iloc[:S1]),
+    ('Val',   df.iloc[S1:S2]),
+    ('Test',  df.iloc[S2:]),
+]
 
-    fe = mkfe(df, fcols)
-    # 补齐训练时有但测试没有的特征列
-    for c in feature_cols:
-        if c not in fe.columns:
-            fe[c] = 0.0
+# === 4. 评估 ===
+print()
+print('=' * 90)
+print(f'  E15: XGBoost Focal + smooth3  |  Threshold = {threshold:.4f}')
+print('=' * 90)
+print(f'{"Set":<8} {"AUC-PR":<10} {"Acc":<8} {"F1":<8} {"Prec":<8} {"Rec":<8} {"FP":<6} {"FN":<6} {"Pred":<8}')
+print('-' * 90)
 
+for name, split_df in splits:
+    y_true = split_df['y'].values
+    fe = mkfe(split_df.drop(columns=['y']), fcols)
     X = scaler.transform(fe[feature_cols].values)
+
     scores = model.predict(xgb.DMatrix(X))
     scores = temporal_smooth(scores, smooth_window)
     pred = (scores >= threshold).astype(int)
 
-    out = pd.DataFrame({'y_pred': pred})
-    out.to_csv(output_path, index=False)
-    log(f'  {label}: {pred.sum()}/{len(pred)} anomalies predicted -> {output_path}')
+    aucpr = average_precision_score(y_true, scores)
+    acc = accuracy_score(y_true, pred)
+    f1 = f1_score(y_true, pred)
+    prec = precision_score(y_true, pred, zero_division=0)
+    rec = recall_score(y_true, pred)
+    fp = ((pred == 1) & (y_true == 0)).sum()
+    fn = ((pred == 0) & (y_true == 1)).sum()
 
-# === 3. 推理 ===
-predict_file('data/test_simple.csv',  os.path.join(OUTPUT_DIR, 'pred_simple.csv'),  'test_simple')
-predict_file('data/test_complex.csv', os.path.join(OUTPUT_DIR, 'pred_complex.csv'), 'test_complex')
+    print(f'{name:<8} {aucpr:<10.4f} {acc:<8.4f} {f1:<8.4f} {prec:<8.4f} {rec:<8.4f} {fp:<6} {fn:<6} {pred.sum():<3}/{len(y_true):<4}')
 
+print('=' * 90)
 log('DONE')
