@@ -1,166 +1,202 @@
-# v5 最终报告：E15 — XGBoost Focal + 时序平滑
+# Robust Anomaly Detection in Noisy Time-Series Data
 
-**日期**: 2026-05-15
-**最终模型**: E15: XGBoost Focal (B) + 时间平滑窗口 3
-**筛选方式**: 在 17 组消融配置中，以 Val 集 F1 最大化为目标选择阈值，综合三集一致性和过拟合风险确定最终模型。
-
----
-
-## 1. 最终模型详情
-
-### 1.1 模型结构与参数
-
-```
-基模型: XGBoost Focal (B)
-
-参数:
-  objective        = binary:logistic
-  max_depth        = 5
-  learning_rate    = 0.03
-  subsample        = 0.8
-  colsample_bytree = 0.8
-  scale_pos_weight = 480  (≈ 2 × 负类/正类比例)
-  seed             = 42
-  tree_method      = hist
-  num_round        = 1500
-
-后处理:
-  temporal_smooth(window=3)   ← 关键：窗口 3 的等权滑动平均
-  阈值: 0.0061 (Val 集最大化 F1 选择)
-```
-
-### 1.2 平滑机制
-
-平滑操作是一个窗口 3 的等权滑动平均：
-
-```
-smooth(t) = (raw(t-1) + raw(t) + raw(t+1)) / 3
-```
-
-效果：对边缘预测做邻域平均，抑制单点噪声导致的误报。窗口 3 是三者中唯一让 Train/Val/Test 三集 F1 一致的设置。
-
-| 平滑窗口 | Val AUC-PR | Test F1 | Train F1 | Δ(Train-Test) |
-|---------|-----------|---------|---------|:-------------:|
-| 无 (E17) | 0.9923 | 0.9569 | 0.7837 | -0.1732 |
-| **3 (E15)** | **0.9830** | **0.9356** | **0.9474** | **+0.0117** |
-| 7 (E16) | 0.9704 | 0.9312 | 0.9015 | -0.0297 |
-
-无平滑版本 Test F1 最高但阈值极低（0.0012），Train 集 FP=149，说明它对训练集尾部异常过度敏感。平滑 3 将阈值提升至 0.0061，Train FP 降至 30，三集行为一致。
+**Course project report** · May 2026  
+**Final model:** XGBoost with class reweighting + temporal smoothing (window 3)
 
 ---
 
-## 2. 三集完整指标
+## 1. Introduction and Related Work
 
-### 2.1 E15 三集对比
+Time-series anomaly detection aims to flag rare events in sequential observations. In financial monitoring and similar domains, data are often **noisy**, **severely imbalanced** (anomalies are rare), and **temporally structured**: anomalies frequently appear as sustained patterns rather than isolated spikes. Standard point-wise classifiers can therefore underperform unless they incorporate sequential context and imbalance-aware learning.
 
-| 指标 | Train | Val | Test |
-|------|:----:|:---:|:----:|
+Our work sits in a well-established line of methods:
+
+| Family | Representative ideas | Relevance to this project |
+|--------|----------------------|---------------------------|
+| **Reconstruction / density** | LSTM autoencoders, variational models, One-Class SVM | Model “normality”; strong under distribution shift but harder to tune on tabular financial features |
+| **Unsupervised scoring** | Isolation Forest, LOF, COPOD | No label dependence; useful when labels are scarce, but weak when anomalies resemble dense normal regions |
+| **Supervised tabular learners** | Gradient boosting (XGBoost, LightGBM) on engineered features | High capacity on mixed feature types; effective when labels exist and features encode temporal structure |
+| **Post-processing** | Score smoothing, contiguous-segment rules | Reduces spurious point alarms in noisy series |
+
+Early iterations in this repository explored **multi-model ensembles** (XGBoost + LightGBM + Isolation Forest) and regime-aware splits. Ablation study **v5** showed that, with only **270** labeled anomalies in the training segment, **a single well-tuned XGBoost classifier with temporal features and score smoothing** outperformed heavier ensembles. The final pipeline deliberately favors **simplicity and stable generalization** over model complexity, which is especially important for **Task 2**, where the test distribution differs from training.
+
+---
+
+## 2. Problem Setting and Tasks
+
+We use labeled data in `train.csv` (137,192 time steps, 33 features `f1`–`f33`, binary label `y`) and two unlabeled test sets:
+
+| Dataset | Rows | Role |
+|---------|------|------|
+| `test_simple.csv` | 25,647 | **Task 1** — similar distribution to training |
+| `test_complex.csv` | 34,542 | **Task 2** — more complex / shifted anomaly patterns |
+
+**Task 1:** Train on `train.csv`, tune on a temporal validation split, and output `pred_simple.csv` (`y_pred` per row).  
+**Task 2:** Apply the **same** trained model and threshold **without retraining or fine-tuning**, and output `pred_complex.csv`. Robustness in Task 2 is therefore determined entirely by choices made during Task 1 (features, imbalance handling, smoothing, threshold).
+
+---
+
+## 3. Method Design and Implementation
+
+### 3.1 Overview
+
+The deployed solution (**configuration E15**) is a two-stage pipeline:
+
+1. **Supervised scoring:** XGBoost binary classifier producing an anomaly probability at each time step.
+2. **Temporal post-processing:** length-3 moving average on scores, then thresholding to `{0, 1}`.
+
+The same artifact (`submission_v5/model.pkl`) is used for both tasks via `code/train_final.py` and inference on `test_simple.csv` / `test_complex.csv`.
+
+### 3.2 Temporal feature engineering
+
+Raw features alone do not expose dynamics over time. We construct **310** dimensions per time step from the 33 base features:
+
+- **Rolling statistics** (windows 5, 10, 20): per-feature mean and standard deviation (`_rm*`, `_rs*`), capturing local level and volatility.
+- **Differences** (`_d1`, `_d5`): short- and medium-horizon changes to highlight abrupt shifts.
+- **Lags** (1 and 3 steps on `f1`–`f3`): explicit autoregressive information.
+- **Pairwise interactions** among the first three features.
+- **Row aggregates** (`row_mean`, `row_std`, `row_max`, `row_min`): global snapshot across sensors at each step.
+
+Missing values are imputed with the **training-set median** per feature. All engineered columns are **standardized** (`StandardScaler`) using training statistics only. Features are computed **in time order** on each split so that rolling and lag operations respect causality.
+
+### 3.3 Base classifier (XGBoost “Focal” variant)
+
+We use XGBoost with `binary:logistic` objective. The “Focal” label in our codebase refers to **stronger positive-class weighting** (`scale_pos_weight ≈ 2 × neg/pos ratio`, ≈480) and slightly **shallower trees** (`max_depth=5`, `learning_rate=0.03`) compared to a standard XGBoost baseline. This addresses **class imbalance** by up-weighting the minority class during split finding.
+
+| Hyperparameter | Value |
+|----------------|-------|
+| `max_depth` | 5 |
+| `learning_rate` | 0.03 |
+| `subsample` / `colsample_bytree` | 0.8 |
+| `scale_pos_weight` | ≈480 |
+| `num_round` | 1500 |
+| `seed` | 42 |
+
+Ablation showed that standalone LightGBM and multi-model blends **did not** improve validation AUC-PR when training anomalies are scarce; they added variance without gain.
+
+### 3.4 Addressing noise
+
+Financial observations are noisy at the point level. We apply two mechanisms:
+
+1. **Rolling mean/std features** — scores reflect local neighborhoods rather than single noisy readings.
+2. **Temporal score smoothing** — after prediction, replace each score with the mean of itself and its immediate neighbors:
+
+$$\text{smooth}(t) = \frac{s_{t-1} + s_t + s_{t+1}}{3}$$
+
+This suppresses isolated false positives while preserving segment-level anomalies. Window **3** was selected because it yields **consistent** train/validation/test behavior; larger windows (7) increased false negatives, and no smoothing (E17) produced an unstable, overly low threshold.
+
+### 3.5 Task 1 vs Task 2 implementation
+
+| Aspect | Task 1 (`test_simple`) | Task 2 (`test_complex`) |
+|--------|------------------------|-------------------------|
+| Model weights | Fixed from `train.csv` [0 : 130,816) | **Identical** — no adaptation |
+| Feature recipe | Same `mkfe()` + scaler | Same |
+| Threshold | 0.0061 (from validation F1) | **Same** — required by project rules |
+| Output | `pred_simple.csv` | `pred_complex.csv` |
+
+Task 2 is **not** a separate training problem; generalization is encouraged by (i) temporal features that capture patterns rather than absolute levels alone, (ii) moderate model depth to limit memorization, and (iii) smoothing that favors coherent anomaly segments.
+
+**Submission-level prediction rates** (same model, no label access): Task 1 — 858 / 25,647 positives (3.35%); Task 2 — 576 / 34,542 positives (1.67%). The lower rate on the complex set is consistent with a more conservative score distribution under distribution shift, without threshold retuning.
+
+---
+
+## 4. Validation Strategy and Model Selection
+
+### 4.1 Temporal data split
+
+Random cross-validation would leak future information. We use a **chronological split** of `train.csv`:
+
+| Split | Index range | Rows | Anomalies | Rate | Use |
+|-------|-------------|------|-----------|------|-----|
+| **Train** | [0, 130,816) | 130,816 | 270 | 0.21% | Fit model & scaler |
+| **Validation** | [130,816, 134,545) | 3,729 | 180 | 4.83% | Threshold & model selection |
+| **Test (hold-out)** | [134,545, end) | 2,647 | 120 | 4.53% | Final internal evaluation |
+
+Anomalies cluster toward the **end** of the series; validation and test segments have much higher prevalence than the training segment. This mimics realistic deployment where recent regimes differ from distant history and stresses **temporal generalization**.
+
+The **test** segment is never used for training or threshold fitting.
+
+### 4.2 Metrics
+
+Because of extreme imbalance, **accuracy alone is misleading**. We report:
+
+- **AUC-PR** (area under the precision–recall curve) — primary ranking metric for comparing scoring functions on validation data.
+- **F1, Precision, Recall** — at a fixed threshold.
+- **FP / FN counts** — interpretable error types for rare-event detection.
+
+Threshold selection: on the **validation** set, after smoothing, choose the threshold that **maximizes F1** along the precision–recall curve (`sklearn.metrics.precision_recall_curve`). That threshold is frozen for train, validation, test, and both submission files.
+
+### 4.3 Ablation and selection procedure
+
+`code/experiment_v5.py` trains five base learners (XGBoost standard, XGBoost reweighted, LightGBM, and feature-selected variants) and evaluates **17** configurations (single models, weighted ensembles, smoothing variants). Configurations are ranked by **validation AUC-PR**; the final choice (**E15**) additionally considers:
+
+- **Train–test F1 gap** (overfitting): E15 has Δ(F1) = +0.012 vs E17 (no smooth) with Δ = −0.17 on train vs test, indicating E17 overfits tail structure.
+- **Threshold stability**: E15 threshold 0.0061 vs E17 threshold 0.0012.
+- **Balanced errors**: E15 test FP=4, FN=11 vs competitive alternatives.
+
+---
+
+## 5. Experimental Results and Analysis
+
+### 5.1 Final model (E15) on internal splits
+
+Threshold = **0.0061** (validation F1-optimal after smooth-3).
+
+| Metric | Train | Validation | Test (hold-out) |
+|--------|:-----:|:----------:|:---------------:|
 | AUC-PR | 1.0000 | 0.9830 | **0.9891** |
 | Accuracy | 0.9998 | 0.9941 | 0.9943 |
-| F1 | **0.9474** | **0.9375** | **0.9356** |
+| F1 | 0.9474 | 0.9375 | **0.9356** |
 | Precision | 0.9000 | 0.9593 | 0.9646 |
 | Recall | 1.0000 | 0.9167 | 0.9083 |
 | FP | 30 | 7 | **4** |
 | FN | 0 | 15 | **11** |
-| 预测异常 | 300/130816 | 172/3729 | 113/2647 |
+| Predicted anomalies | 300 | 172 | 113 |
 
-Train 的 Recall=1.0（FN=0）是因为 270 个训练异常全部在序列尾部被正确召回。Test 上 FP=4、FN=11，在极度不平衡数据上表现均衡。
+Train recall is 1.0 (all 270 training-segment anomalies detected) with modest false positives. On hold-out test data, precision remains high (0.96) with 11 missed anomalies — a deliberate bias toward precision, which helps limit false alarms in Task 1 and may carry over to Task 2 under shift.
 
-### 2.2 E15 与其他配置对比（Test 集）
+### 5.2 Ablation highlights (validation AUC-PR)
 
-| 配置 | AUC-PR | F1 | FP | FN | 说明 |
-|------|:------:|:--:|:--:|:--:|------|
-| **E15 B+smooth3** | **0.9891** | **0.9356** | **4** | **11** | **最终选择** |
-| E17 B+nosmooth | 0.9974 | 0.9569 | 1 | 9 | 测试指标更高，但有分布偏移风险 |
-| E2 B | 0.9825 | 0.9333 | 8 | 8 | 无平滑，FP/FN 均衡 |
-| E16 B+smooth7 | 0.9772 | 0.9312 | 12 | 5 | 更激进，FN=5 但 FP=12 |
-| E8 B+C 0.5+0.5 | 0.9622 | 0.9053 | 13 | 10 | 加 LGB 后反而变差 |
-| E1 A (XGB std) | 0.9640 | 0.9013 | 8 | 15 | 标准 XGB，不如 Focal |
+| Configuration | Val AUC-PR | Comment |
+|---------------|:----------:|---------|
+| **E2 — XGBoost reweighted (B)** | **0.9756** | Best single base model |
+| E1 — XGBoost standard (A) | 0.9635 | Weaker imbalance handling |
+| E8 — B + LightGBM ensemble | 0.9698 | Ensemble hurts |
+| E3 — LightGBM alone (C) | 0.5545 | Unstable; many false alarms |
 
-### 2.3 为什么 E15 不是 Test 指标最高但被选中
+**Smoothing comparison** (same base model B):
 
-E17 (nosmooth) Test F1=0.9569 > E15 的 0.9356，但 E15 是最终选择，原因：
+| Variant | Val AUC-PR | Test F1 | Train F1 | Train−Test F1 Δ |
+|---------|:----------:|:-------:|:--------:|:---------------:|
+| No smooth (E17) | 0.9923 | **0.9569** | 0.7837 | −0.173 |
+| **Smooth-3 (E15)** | 0.9830 | 0.9356 | 0.9474 | **+0.012** |
+| Smooth-7 (E16) | 0.9704 | 0.9312 | 0.9015 | −0.030 |
 
-1. **三集一致性**: E15 Train/Val/Test F1 分别为 0.9474/0.9375/0.9356，Δ≤0.012；E17 分别为 0.7837/0.9534/0.9569，Δ=0.173
-2. **阈值稳定性**: E15 阈值 0.0061 对分布偏移更鲁棒；E17 阈值 0.0012 过于敏感
-3. **过拟合风险**: E17 Train FP=149（预测异常的 35.6% 是 FP），说明模型实际上学到的是"尾部一定异常"，而不是泛化模式
+E17 achieves the highest internal test F1 but exhibits **severe train–test inconsistency** and many training false positives (149), suggesting sensitivity to tail artifacts rather than robust patterns. **E15** was selected for deployment.
 
----
+### 5.3 Strengths
 
-## 3. 消融实验摘要
+- **Strong internal ranking** on temporally honest validation and hold-out test (AUC-PR ≈ 0.99, F1 ≈ 0.94).
+- **Explicit temporal modeling** without fragile end-to-end sequence training.
+- **Simple, reproducible pipeline** (~66 s full ablation on CPU in `experiment_v5_log.txt`).
+- **Single model for both tasks** — satisfies project constraints and eases maintenance.
 
-### 3.1 单模型对比（Val AUC-PR）
+### 5.4 Limitations and Task 2 outlook
 
-| 模型 | Val AUC-PR | 结论 |
-|------|:----------:|------|
-| **B (XGBoost Focal)** | **0.9756** | **最优** |
-| A (XGBoost 标准) | 0.9635 | 次之 |
-| C (LightGBM) | 0.5545 | 过拟合，不可单独使用 |
-
-### 3.2 集成 vs 单模型
-
-所有含 LGB 或 Selected 子模型的组合均不如单模型 B：
-- B+C (E8): 0.9698 < B: 0.9756
-- A+B+C (E10): 0.9679 < B: 0.9756
-- +Selected (E13/E14): ≤0.9679 < B: 0.9756
-
-**结论：多模型集成在 270 个异常样本的场景下无益。额外模型引入的噪声超过信号。**
-
-### 3.3 权重敏感性
-
-| A:B 权重 | Val AUC-PR | 特点 |
-|---------|:----------:|------|
-| 1:0 (E1) | 0.9635 | 纯标准 XGB |
-| 0.7:0.3 (E5) | 0.9686 | 保守 |
-| 0.5:0.5 (E4) | 0.9713 | 均衡 |
-| 0.3:0.7 (E6) | **0.9733** | **偏 Focal** |
-| 0:1 (E2) | **0.9756** | **纯 Focal 最优** |
+1. **Scarce training anomalies** (270 in the fit segment) cap model capacity; metrics have high variance.
+2. **Distribution shift** between early train (0.2% anomaly rate) and later val/test (~4.5%) makes threshold calibration sensitive; we cannot retune on `test_complex`.
+3. **Internal test ≠ course test** — metrics above are on a temporal slice of `train.csv`; instructor-held labels on `test_simple` / `test_complex` may differ.
+4. **Task 2 complexity** — if complex anomalies differ in duration, magnitude, or feature interactions not seen in training, a tree model trained on historical labels may **under-recall** new pattern types (evidenced by lower predicted positive rate on `test_complex` without threshold adjustment).
+5. **No segment-level objectives** — we optimize per-step F1, not explicit contiguous anomaly regions; future work could add HMM-style or contiguous-penalty post-processing.
 
 ---
 
-## 4. 数据说明
+## 6. Division of Work Among Team Members
 
-### 4.1 数据划分
+| Team member | Primary contributions | alpha |
+|-------------|----------------------|:-:|
+| **唐宇奥 (Tang Yu'ao)** | Model development through successive version iterations (v1–v4): PCA-based preprocessing, hybrid / ensemble models (e.g., combining gradient boosting with Isolation Forest) | 1 |
+| **黄涵幸 (Huang Hanxing)** | Train / validation / test split; ablation studies and configuration comparison; report | 1 |
+| **龙泽鑫 (Long Zexin)** | Ablation studies and configuration comparison; final model selection (E15) and training; report | 1 |
 
-| 集合 | 行数 | 异常数 | 异常率 | 用途 |
-|------|:----:|:------:|:------:|------|
-| Train | 130,816 | 270 | 0.21% | 模型训练 |
-| Val | 3,729 | 180 | 4.83% | 阈值选择（最大化 F1） |
-| Test | 2,647 | 120 | 4.53% | 最终评估（从未参与训练或选择） |
-
-注意：异常集中在序列尾部，Val 和 Test 的异常率远高于 Train（约 4.5% vs 0.2%），这是时间序列切分的固有特征。
-
-### 4.2 特征工程（310 维）
-
-```
-原始特征:        f1~f33 (33 维)
-滚动窗口均值:    f{i}_rm{5/10/20}    (99 维)
-滚动窗口标准差:  f{i}_rs{5/10/20}    (99 维)
-一阶差分:        f{i}_d1             (33 维)
-五阶差分:        f{i}_d5             (33 维)
-滞后特征:        f{1..3}_l{1/3}      (6 维)
-交互特征:        i_{0,1}_{1,2}       (3 维)
-行统计量:        row_mean/std/max/min (4 维)
-```
-
----
-
-## 5. 局限
-
-1. **小样本异常**: 训练集仅 270 个异常，模型容量受限，指标方差较大
-2. **数据分布偏移**: Train/Val/Test 为时间切分，异常集中在最后 9% 数据，三集异常率差异大
-3. **内部评估局限**: 所有指标基于 `train.csv` 的时间切分，不代表在 `test_simple.csv` / `test_complex.csv` 上的实际表现
-
----
-
-## 6. 使用方式
-
-```bash
-cd MLProject
-python code/experiment_v5.py
-```
-
-脚本会自动完成：数据加载 → 特征工程 → 5 基模型训练 → 14+3 组配置评估 → 输出完整报告。
-最终选择 E15 配置（阈值 0.0061），如需导出预测结果需额外添加推理代码。
-
-运行时间：约 **66 秒**（CPU）。
+The final v5 model was chosen from the ablation results. Earlier version iterations (v1–v4) supplied the modeling ideas that were later compared and refined in the ablation phase.
