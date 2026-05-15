@@ -92,12 +92,12 @@ B = xgb.train({'objective':'binary:logistic','max_depth':5,'learning_rate':0.03,
 log('Training LightGBM (C)...')
 C = lgb.train({'objective':'binary','boosting_type':'gbdt','num_leaves':31,
     'learning_rate':0.05,'feature_fraction':0.8,'bagging_fraction':0.8,'bagging_freq':5,
-    'is_unbalance':True,'seed':42,'verbose':-1}, lgb.Dataset(X_train,label=y_train), 2000,
-    callbacks=[lgb.log_evaluation(50)])
+    'is_unbalance':True,'min_child_weight':5.0,'seed':42,'verbose':-1},
+    lgb.Dataset(X_train,label=y_train), 2000, callbacks=[lgb.log_evaluation(50)])
 
 log('Feature selection for D/E...')
 sel = lgb.train({'objective':'binary','boosting_type':'gbdt','num_leaves':31,
-    'learning_rate':0.05,'is_unbalance':True,'seed':42,'verbose':-1},
+    'learning_rate':0.05,'is_unbalance':True,'min_child_weight':5.0,'seed':42,'verbose':-1},
     lgb.Dataset(X_train,label=y_train), 500, callbacks=[lgb.log_evaluation(0)])
 imp = sel.feature_importance(importance_type='gain')
 sel_names = [n for _,n in sorted(zip(imp,common), reverse=True)][:100]
@@ -115,8 +115,8 @@ D = xgb.train({'objective':'binary:logistic','max_depth':6,'learning_rate':0.05,
 log('Training LightGBM sel (E)...')
 E = lgb.train({'objective':'binary','boosting_type':'gbdt','num_leaves':31,
     'learning_rate':0.05,'feature_fraction':0.8,'bagging_fraction':0.8,'bagging_freq':5,
-    'is_unbalance':True,'seed':42,'verbose':-1}, lgb.Dataset(X_train_sel,label=y_train),
-    2000, callbacks=[lgb.log_evaluation(0)])
+    'is_unbalance':True,'min_child_weight':5.0,'seed':42,'verbose':-1},
+    lgb.Dataset(X_train_sel,label=y_train), 2000, callbacks=[lgb.log_evaluation(0)])
 
 # === PRECOMPUTE PREDICTIONS ===
 log('Computing predictions...')
