@@ -1,166 +1,115 @@
 # MLProject：时序异常检测项目
 
-这是一个面向时序数据的异常检测项目。给定带标签的训练集 `train.csv` 和两个无标签测试集 `test_simple.csv`、`test_complex.csv`，目标是训练模型并输出二值异常预测结果 `y_pred`。
+面向时序数据的异常检测任务。给定带标签的训练集 `train.csv` 和两个无标签测试集 `test_simple.csv`、`test_complex.csv`，训练模型并输出二值异常预测 `y_pred`。
 
-当前仓库已经保留了从早期基线到较强版本的多套实现。其中：
+**数据规模**：`train.csv` 137,192 行 / `test_simple.csv` 25,647 行 / `test_complex.csv` 34,542 行
 
-- `v3` 是当前稳定 baseline，结构更简单，适合复现和继续迭代
-- `v4_NoRegime` 是当前主实验线，效果更强，包含多折验证和更复杂的集成设计
-- `v4_Regime(ErrorVersion)` 仅作历史实验保留，不建议默认使用
+**最新版本 (v5)**：消融实验表明 4 个子模型冗余，精简为 **XGBoost Focal + LightGBM 等权集成**，AUC-PR = 0.9993，F1 = 0.9876。
 
-## 1. 项目目标
+---
 
-任务核心是从高噪声、强时序、极度类别不平衡的数据中识别异常点。
-
-- 训练集：`data/train.csv`
-- 测试集1：`data/test_simple.csv`
-- 测试集2：`data/test_complex.csv`
-- 特征列：`f1 ~ f33`
-- 标签列：`y`，只在训练集存在
-- 提交格式：单列 `y_pred`
-
-当前数据规模：
-
-- `train.csv`：137,192 行，34 列
-- `test_simple.csv`：25,647 行，33 列
-- `test_complex.csv`：34,542 行，33 列
-
-## 2. 仓库结构
+## 仓库结构
 
 ```text
 MLProject/
-├── code/                        # 训练与预测主脚本
-├── data/                        # 原始数据集
-├── docs/                        # 指标、结果摘要、技术交接文档
-├── notebooks/                   # v3/v4 结果展示与分析 notebook
-├── submission/                  # v2 输出
+├── code/                        # 训练脚本
+│   ├── train_predict_v2.py          # 早期基线
+│   ├── train_predict_v3_fast.py     # 稳定 baseline
+│   ├── train_predict_v4_NoRegime.py # v4 主实验线（含 IF/Cascade/Selected）
+│   ├── train_predict_v4_Regime(ErrorVersion).py  # 历史实验，保留参考
+│   ├── ablation_study.py            # 消融实验（8组配置，含 IF）
+│   ├── eval_all_configs.py          # IForest 诊断分析
+│   └── experiment_v5.py             # v5 消融（去 IF，17组权重搜索）
+├── data/                        # 原始数据
+├── docs/
+│   ├── handover.md                  # 技术交接文档
+│   ├── metric.md                    # 指标说明
+│   ├── v4result.md                  # v4 结果摘要
+│   ├── experiment_v5_report.md      # v5 实验报告（17组配置详细结果）
+│   └── iforest_vs_xgb_scores.png    # IF vs XGBoost 得分分布诊断图
+├── notebooks/                   # v3/v4 分析 notebook
+├── submission_v2/               # v2 输出
 ├── submission_v3/               # v3 输出
-├── submission_v4_NoRegime/      # 当前 v4 主线输出
-├── submission_notebook/         # notebook 相关输出
-├── validation/                  # 验证、复现、对比实验辅助脚本
+├── submission_v4_NoRegime/      # v4 主线输出
+├── submission_v3notebook/       # notebook 相关输出
+├── validation/                  # 辅助验证/复现脚本
 ├── Project.pdf                  # 题目说明
-├── README.md                    # 项目入口说明
-└── AGENTS.md                    # 给 agent 的仓库协作说明
+├── AGENTS.md                    # agent 协作说明
+└── README.md
 ```
 
-## 3. 主要脚本说明
+---
 
-### `code/`
+## 脚本说明
 
-- `train_predict_v2.py`
-  早期基线版本，输出到 `submission/`
+### 主线训练脚本
 
-- `train_predict_v3_fast.py`
-  当前稳定 baseline，输出到 `submission_v3/`
+| 脚本 | 说明 |
+|------|------|
+| `train_predict_v2.py` | 早期基线，输出到 `submission_v2/` |
+| `train_predict_v3_fast.py` | 稳定 baseline，结构简单，无 regime 风险 |
+| `train_predict_v4_NoRegime.py` | v4 主线，7子模型集成（XGBstd + XGBfocal + LGB + IF + Cascade + XGBsel + LGBsel） |
+| `train_predict_v4_Regime(ErrorVersion).py` | 历史实验，存在 regime_id 风险，不建议使用 |
 
-- `train_predict_v4_NoRegime.py`
-  当前主实验版本，输出到 `submission_v4_NoRegime/`
+### 实验/分析脚本
 
-- `train_predict_v4_Regime(ErrorVersion).py`
-  保留的历史实验版本，存在 `regime_id` 相关风险，不建议默认继续使用
+| 脚本 | 说明 |
+|------|------|
+| `ablation_study.py` | 首次消融实验（8组配置），对比含 IF 的各种组合 |
+| `eval_all_configs.py` | IForest 诊断，6 种 IF 配置 + 得分分布对比，验证无数据泄露 |
+| `experiment_v5.py` | **最终消融实验**，去掉 IF 后搜索 17 组模型组合与权重 |
 
-### `validation/`
-一些辅助进行实验的代码，不重要，agent可视需求使用
-- `validate_submission_v3_pkl.py`
-  回放 `submission_v3/model.pkl`，验证保存模型是否能复现 v3 指标逻辑
+### 关键发现（v5 实验）
 
-- `run_regime_ablation.py`
-  对比 `global_regime`、`local_regime`、`no_regime` 三种设置
+1. **IForest 不适配** — 316维特征 + 30行连续异常块，IF AUC-PR ≤ 0.074
+2. **XGBoost Focal > 标准版** — scale_pos_weight × 2 更重视异常样本
+3. **时间平滑有害** — 窗口 3/5/7 均降低 AUC-PR
+4. **Selected 子模型无贡献** — Top-100 特征训练的子模型无增益
+5. **双模型足够** — 三模型比双模型提升仅 +0.0001 AUC-PR
 
-- `fill_metric_prediction_rates.py`
-  统计提交文件中的异常比例，回填到指标文档
+**最佳配置**：`0.5 × XGBoost Focal + 0.5 × LightGBM`，无时间平滑
 
-- `update_model_demo_notebook.py`
-  同步更新 v3 notebook 展示逻辑
+---
 
-- `create_v4_notebook.py`
-  生成或重建 v4 notebook 内容
-
-- `execute_notebook_locally.py`
-  本地直接执行 notebook，不依赖 `nbconvert`
-
-
-## 4. 环境依赖
-
-当前代码中可见的主要依赖包括：
-
-- `pandas`
-- `numpy`
-- `scikit-learn`
-- `xgboost`
-- `lightgbm`
-- `matplotlib`
-
-可先安装这一组基础依赖：
+## 环境依赖
 
 ```powershell
 pip install pandas numpy scikit-learn xgboost lightgbm matplotlib
 ```
 
-如果你要运行 notebook 生成或展示流程，可能还需要补充 Jupyter 相关包。
+---
 
-## 5. 当前版本建议
+## 结果摘要
 
-如果你是第一次接手这个仓库，建议按下面顺序理解和使用：
+| 版本 | AUC-PR | F1 | 说明 |
+|------|--------|----|------|
+| v3 | 0.9285 | 0.9292 | 稳定 baseline |
+| v4_NoRegime | 0.9723 (CV) | 0.9382 | 7模型集成，含 IF/Cascade |
+| **v5 最优 (E17)** | **0.9993** | **0.9876** | B+C 等权，无平滑，仅 FP=2, FN=1 |
 
-1. 通过 `docs/handover.md`了解当前工作的主要成果
-2. 浏览与运行`notebooks/`文件夹下的notebook，了解v3，v4版本的模型的构建细节
+### v5 单模型排名
 
+| 排名 | 模型 | AUC-PR | F1 |
+|------|------|--------|----|
+| 1 | XGBoost Focal | 0.9965 | 0.9667 |
+| 2 | XGBoost 标准 | 0.9954 | 0.9597 |
+| 3 | LightGBM | 0.9900 | 0.9600 |
 
-当前版本定位：
+详细结果见 [`docs/experiment_v5_report.md`](docs/experiment_v5_report.md)。
 
-- `v2`
-  早期可运行基线，主要价值是提供最初的端到端模板
+---
 
-- `v3`
-  当前稳定 baseline，去掉了高风险的 `regime_id` 特征，适合继续做稳妥迭代
+## 推荐阅读顺序
 
-- `v4_NoRegime`
-  当前主实验线，在 v3 基础上加入多折时序验证、更多分支模型和后处理逻辑
-
-- `v4_Regime(ErrorVersion)`
-  历史实验保留版本，不建议默认当作可交付主线
-
-## 6. 当前结果摘要
-
-详细指标请看 `docs/metric.md` 和 `docs/v4result.md`。这里仅保留最关键的版本结论。
-
-### v3
-
-- AUC-PR：`0.9285`
-- F1：`0.9292`
-- AUC-ROC：`0.9781`
-- `submission_v3/pred_simple.csv`：883 / 25,647 预测为异常
-- `submission_v3/pred_complex.csv`：580 / 34,542 预测为异常
-
-### v4_NoRegime
-
-- CV Avg AUC-PR：`0.9723`
-- CV Avg F1：`0.9382`
-- AUC-ROC：`0.9993`
-- `submission_v4_NoRegime/pred_simple.csv`：857 / 25,647 预测为异常
-- `submission_v4_NoRegime/pred_complex.csv`：643 / 34,542 预测为异常
-
-## 7. 输出文件说明
-
-训练脚本运行完成后，会生成以下文件：
-
-- `pred_simple.csv`
-- `pred_complex.csv`
-- `model.pkl`
-
-其中：
-
-- `pred_simple.csv` 和 `pred_complex.csv` 只应包含一列：`y_pred`
-- `model.pkl` 保存训练好的模型、阈值、特征列和部分复现所需元数据
-
-## 8. 推荐阅读顺序
-
-如果你想快速进入项目，建议这样看：
-
-1. 本 `README.md`
+1. `README.md`
 2. `docs/handover.md`
-3. `notebooks/` 中的展示和分析材料
-4. `code/train_predict_v3_fast.py`
-5. `code/train_predict_v4_NoRegime.py`
+3. `docs/experiment_v5_report.md` — 最新实验结论优先看
+4. `notebooks/` 中的分析材料
+5. `code/train_predict_v3_fast.py`
+6. `code/train_predict_v4_NoRegime.py`
 
+---
+
+## 提交文件格式
+
+每个 `pred_simple.csv` / `pred_complex.csv` 仅含一列：`y_pred`（0 或 1）。`model.pkl` 保存完整模型、阈值与元数据。

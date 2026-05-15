@@ -41,3 +41,8 @@ checkpoints/
 validation/*tmp*.csv
 validation/*debug*.csv
 validation/*scratch*.csv
+
+# Experiment generated outputs
+ablation_results/
+experiment_*_log.txt
+__pycache__/
