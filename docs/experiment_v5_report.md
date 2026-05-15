@@ -142,7 +142,7 @@ Because of extreme imbalance, accuracy alone is misleading. We report:
 
 ### 4.3 Ablation procedure
 
-`code/experiment_v5.py` trains all five base learners, then evaluates **17 configurations** in a unified pipeline:
+We trains all five base learners, then evaluates **17 configurations** in a unified pipeline:
 
 1. Train each base learner once (A, B, C, D, E).
 2. For each configuration, compute ensemble scores (weighted averages where applicable).
@@ -156,171 +156,66 @@ This design ensures fair comparison: every configuration uses the same underlyin
 
 ## 5. Experimental Results and Analysis
 
-### 5.1 Full ablation ranking
+All 17 configurations share the same chronological split and thresholding protocol (Section 4). Configurations are ranked by **validation AUC-PR**; the hold-out test segment is used only for final assessment.
 
-The 17 configurations are ranked by **validation AUC-PR** (the primary selection metric). The full ranking reveals a clear hierarchy:
+### 5.1 Ablation ranking (validation and test)
 
 ![17 configurations ranked by Val AUC-PR](chart_val_aucpr.png)
 
-*Figure 1. Validation AUC-PR across all 17 configurations, sorted ascending. The top performers are all built on model B (XGBoost Reweighted). Models incorporating LightGBM (C) or feature-selected variants (D, E) consistently underperform.*
+*Figure 2. Validation AUC-PR across all 17 configurations. Top performers are built on model B (XGBoost Reweighted); LightGBM (C) and feature-selected variants (D, E) rank lowest.*
 
-**Val metrics ranking:**
+| Rank | Config | Val AUC-PR | Val F1 | Test AUC-PR | Test F1 | Test FP | Test FN |
+|:----:|--------|:----------:|:------:|:-----------:|:-------:|:-------:|:-------:|
+| 1 | E17 — B, no smooth | **0.9923** | 0.9534 | **0.9974** | **0.9569** | 1 | 9 |
+| 2 | **E15 — B + smooth3** | **0.9830** | 0.9375 | **0.9891** | **0.9356** | 4 | 11 |
+| 3 | E2 — B alone | 0.9756 | 0.9333 | 0.9825 | 0.9333 | 8 | 8 |
+| 4 | E6 — A+B 0.3+0.7 | 0.9733 | 0.9307 | 0.9807 | 0.9333 | 8 | 8 |
+| 5 | E4 — A+B 0.5+0.5 | 0.9713 | 0.9274 | 0.9786 | 0.9333 | 8 | 8 |
+| … | *(ensembles E5–E14)* | 0.96–0.97 | — | 0.87–0.93 | — | — | — |
+| 17 | E3 — C (LGB) | 0.5545 | 0.5810 | 0.4533 | 0.4375 | 80 | 64 |
 
-| Rank | Config | AUC-PR | F1 | FP | FN |
-|:----:|--------|:------:|:--:|:--:|:--:|
-| 1 | **E17 — B, no smooth** | **0.9923** | 0.9534 | 11 | 6 |
-| 2 | **E15 — B + smooth3** | **0.9830** | 0.9375 | 7 | 15 |
-| 3 | **E2 — B (XGB focal)** | **0.9756** | 0.9333 | 12 | 12 |
-| 4 | E6 — A+B 0.3+0.7 | 0.9733 | 0.9307 | 13 | 12 |
-| 5 | E4 — A+B 0.5+0.5 | 0.9713 | 0.9274 | 12 | 14 |
-| 6 | E16 — B + smooth7 | 0.9704 | 0.9326 | 18 | 7 |
-| 7 | E8 — B+C 0.5+0.5 | 0.9698 | 0.9061 | 18 | 16 |
-| 8 | E5 — A+B 0.7+0.3 | 0.9686 | 0.9213 | 12 | 16 |
-| 9 | E12 — A+B+C 0.2+0.4+0.4 | 0.9683 | 0.9061 | 18 | 16 |
-| 10 | E14 — +Selected | 0.9679 | 0.9080 | 10 | 22 |
-| 11 | E10 — A+B+C equal | 0.9679 | 0.9122 | 12 | 19 |
-| 12 | E11 — A+B+C 0.5+0.25+0.25 | 0.9667 | 0.9148 | 11 | 19 |
-| 13 | E13 — +Selected | 0.9645 | 0.9013 | 26 | 11 |
-| 14 | E1 — A (XGB std) | 0.9635 | 0.9235 | 10 | 17 |
-| 15 | E9 — A+C 0.7+0.3 | 0.9598 | 0.9030 | 18 | 17 |
-| 16 | E7 — A+C 0.5+0.5 | 0.9535 | 0.8967 | 23 | 15 |
-| 17 | E3 — C (LGB) | 0.5545 | 0.5810 | 96 | 67 |
-
-The top 6 configurations all use model B (XGBoost Reweighted) either alone or as the dominant component. LightGBM-only (E3) collapses to AUC-PR = 0.55, confirming that leaf-wise growth is unstable at this extreme imbalance.
-
-### 5.2 Test metrics comparison
-
-The hold-out test set provides the most honest assessment of generalization:
+The top six entries all rely on model **B**. **E1 (A)** and **E3 (C)** in the full run confirm that reweighted XGBoost (B) beats standard XGBoost (A) and that LightGBM alone is unstable at this imbalance (Val AUC-PR 0.55). No A+B or A+B+C blend exceeds **B alone** (E2).
 
 ![Test AUC-PR and F1 comparison](chart_test_aucpr_f1.png)
 
-*Figure 2. Test AUC-PR (blue) and F1 (green) across configurations, sorted by AUC-PR. E17 and E15 dominate both metrics. The gap between AUC-PR and F1 widens for lower-ranked configurations.*
+*Figure 3. Test AUC-PR and F1 by configuration (sorted by AUC-PR).*
 
 ![Test FP / FN stacked bars](chart_test_fpfn.png)
 
-*Figure 3. False positive and false negative counts on the test set, sorted by total errors. E17 achieves the lowest total errors (FP=1, FN=9), followed by E15 (FP=4, FN=11).*
-
-**Test metrics (top 5 by AUC-PR):**
-
-| Rank | Config | AUC-PR | F1 | FP | FN |
-|:----:|--------|:------:|:--:|:--:|:--:|
-| 1 | **E17 — B, no smooth** | **0.9974** | **0.9569** | 1 | 9 |
-| 2 | **E15 — B + smooth3** | **0.9891** | **0.9356** | 4 | 11 |
-| 3 | **E2 — B (XGB focal)** | **0.9825** | **0.9333** | 8 | 8 |
-| 4 | E6 — A+B 0.3+0.7 | 0.9807 | 0.9333 | 8 | 8 |
-| 5 | E4 — A+B 0.5+0.5 | 0.9786 | 0.9333 | 8 | 8 |
-
-### 5.3 Single model comparison
-
-The three base models (A, B, C) show dramatically different performance:
+*Figure 4. Test false positives and false negatives. E17 has the fewest total errors; E15 is close behind with more stable train behavior (see below).*
 
 ![Single model comparison on validation set](chart_single_model.png)
 
-*Figure 4. Validation AUC-PR and F1 for the three base learners. XGBoost Reweighted (B) leads on both metrics. LightGBM (C) underperforms significantly due to leaf-wise overfitting at extreme imbalance.*
+*Figure 5. Validation metrics for base learners A, B, and C.*
 
-| Model | Val AUC-PR | Val F1 | Test AUC-PR | Test F1 |
-|-------|:----------:|:------:|:-----------:|:-------:|
-| A — XGBoost Standard | 0.9635 | 0.9235 | 0.9640 | 0.9013 |
-| **B — XGBoost Reweighted** | **0.9756** | **0.9333** | **0.9825** | **0.9333** |
-| C — LightGBM | 0.5545 | 0.5810 | 0.4533 | 0.4375 |
+### 5.2 Model selection: smoothing and E15
 
-B outperforms A on all metrics, confirming that aggressive positive-class weighting (scale_pos_weight ≈ 480, roughly 2× the natural ratio) is beneficial when anomalies are extremely rare. The effect is larger on test AUC-PR (+0.0185) than on validation, suggesting better generalization.
-
-### 5.4 Smoothing analysis
-
-The smoothing variants (E15, E16, E17) applied to base model B reveal an important tradeoff:
+Among variants built on B, temporal smoothing determines deployability:
 
 ![Smoothing variants comparison](chart_smoothing_compare.png)
 
-*Figure 5. Comparison of smoothing windows on model B. E17 (no smooth) achieves the highest test metrics but shows severe train-test inconsistency (Train F1 = 0.78 vs Test F1 = 0.96). E15 (smooth-3) is the most consistent across all three splits.*
+*Figure 6. Smoothing window comparison on model B.*
 
-| Variant | Val AUC-PR | Test F1 | Train F1 | Train FP | Test FP | Train−Test F1 Δ |
-|---------|:----------:|:-------:|:--------:|:--------:|:-------:|:---------------:|
-| E17 — No smooth | **0.9923** | **0.9569** | 0.7837 | 149 | 1 | **−0.173** |
-| **E15 — Smooth-3** | 0.9830 | 0.9356 | **0.9474** | 30 | 4 | **+0.012** |
-| E16 — Smooth-7 | 0.9704 | 0.9312 | 0.9015 | 59 | 12 | −0.030 |
+| Variant | Val AUC-PR | Test F1 | Train F1 | Train−Test F1 Δ | Threshold |
+|---------|:----------:|:-------:|:--------:|:---------------:|:---------:|
+| E17 — no smooth | **0.9923** | **0.9569** | 0.7837 | −0.173 | 0.0012 |
+| **E15 — smooth-3** | 0.9830 | 0.9356 | **0.9474** | **+0.012** | **0.0061** |
+| E16 — smooth-7 | 0.9704 | 0.9312 | 0.9015 | −0.030 | — |
 
-Key observations:
+**E17** ranks first on internal test scores but uses an unstable low threshold (149 training FPs). **E15** trades a small drop in test F1 for consistent train/validation/test behavior and a stable cutoff — preferred for Task 2 under distribution shift.
 
-- **E17 (no smooth)** achieves the highest internal test metrics but at a cost: the threshold is extremely low (0.0012), producing 149 false positives on the training set (0.11% of training rows) and a train-test F1 gap of −0.173. This indicates that the model without smoothing is overfitting to tail artifacts.
+**Selected model (E15)** — threshold 0.0061:
 
-- **E15 (smooth-3)** raises the threshold to 0.0061, reducing training FP from 149 to 30 while maintaining test F1 = 0.9356. The train-test F1 gap is only +0.012 (train slightly higher than test, which is expected). This is the most **consistent** configuration.
-
-- **E16 (smooth-7)** degrades both validation and test metrics, indicating that a window of 7 is too aggressive and begins to miss genuine anomaly segments.
-
-**Selection decision:** Although E17 has higher internal test metrics, E15 is preferred for deployment because:
-1. The train-test consistency is dramatically better (Δ = +0.012 vs −0.173).
-2. The threshold is more stable (0.0061 vs 0.0012).
-3. Under distribution shift (Task 2), a model with consistent behavior across splits is more trustworthy.
-
-### 5.5 E15 detailed breakdown
-
-Configuration E15 (XGBoost Reweighted B + smooth-3) is the selected model. A detailed multi-split analysis follows:
-
-**Threshold:** 0.0061 (validation F1-optimal after smoothing).
-
-| Metric | Train | Validation | Test (hold-out) |
-|--------|:-----:|:----------:|:---------------:|
+| Metric | Train | Validation | Test |
+|--------|:-----:|:----------:|:----:|
 | AUC-PR | 1.0000 | 0.9830 | **0.9891** |
-| Accuracy | 0.9998 | 0.9941 | 0.9943 |
 | F1 | 0.9474 | 0.9375 | **0.9356** |
-| Precision | 0.9000 | 0.9593 | 0.9646 |
-| Recall | 1.0000 | 0.9167 | 0.9083 |
-| FP | 30 | 7 | **4** |
-| FN | 0 | 15 | **11** |
-| Predicted anomalies | 300 / 130,816 | 172 / 3,729 | 113 / 2,647 |
+| Precision / Recall | 0.90 / 1.00 | 0.96 / 0.92 | **0.96 / 0.91** |
+| FP / FN | 30 / 0 | 7 / 15 | **4 / 11** |
 
-![E15 detailed breakdown](chart_e15_detail.png)
+Training recall is 1.0 (all 270 training-segment anomalies detected). Test precision remains high (0.96), limiting false alarms on submission data.
 
-*Figure 6. E15 analysis across train, validation, and test splits. Left: AUC-PR, F1, Precision, Recall. Center: false positive and false negative counts. Right: prediction distribution (anomaly vs. normal predictions per split, log scale).*
-
-Train recall is 1.0 — all 270 training-segment anomalies are detected. AUC-PR reaches 1.0 on the training set because all training anomalies reside at the tail of the sequence and share consistent patterns. This does **not** indicate overfitting: the test set maintains AUC-PR = 0.9891 with balanced FP/FN (4 false positives, 11 false negatives). The model deliberately biases toward precision (0.96 on test), which limits false alarms in production.
-
-### 5.6 Weight sensitivity and ensemble analysis
-
-**Weight sensitivity** (A+B pairs):
-
-| Configuration | Weight ratio | Val AUC-PR | Val F1 |
-|--------------|:------------:|:----------:|:------:|
-| E2 — B alone | — | 0.9756 | 0.9333 |
-| E6 — A+B | 0.3 + 0.7 | 0.9733 | 0.9307 |
-| E4 — A+B | 0.5 + 0.5 | 0.9713 | 0.9274 |
-| E5 — A+B | 0.7 + 0.3 | 0.9686 | 0.9213 |
-| E1 — A alone | — | 0.9635 | 0.9235 |
-
-The pattern is clear: higher weight on model B (Reweighted) consistently improves results, and **no weighted blend surpasses B alone**. This indicates that model A (Standard) and B (Reweighted) are highly correlated — ensembling them provides no diversification benefit.
-
-**Feature-selected variants** (E13, E14) add complexity without gain:
-
-| Contrast | Val AUC-PR | Difference |
-|----------|:----------:|:----------:|
-| E2 — B alone | 0.9756 | — |
-| E14 — +Selected | 0.9679 | −0.0077 |
-| E10 — A+B+C equal | 0.9679 | — |
-| E13 — +Selected | 0.9645 | −0.0034 |
-
-Feature-selected sub-models (trained on top-100 features only) add noise rather than signal. The Selected branch was abandoned.
-
-### 5.7 Overfit analysis
-
-Tracking metrics across train, validation, and test splits reveals which configurations generalize:
-
-**Train vs. Test F1 gap** (sorted by gap, most overfit first):
-
-| Config | Train F1 | Test F1 | Δ (Train − Test) | Assessment |
-|--------|:--------:|:-------:|:----------------:|:-----------|
-| E3 — C (LGB) | 0.1158 | 0.4375 | −0.322 | Unstable (low F1) |
-| E12 — A+B+C | 0.8654 | 0.9053 | −0.040 | Consistent |
-| E8 — B+C 0.5+0.5 | 0.8504 | 0.9053 | −0.055 | Consistent |
-| E1 — A (XGB std) | 0.8896 | 0.9013 | −0.012 | Consistent |
-| E2 — B (XGB focal) | 0.9294 | 0.9333 | −0.004 | Consistent |
-| **E15 — B + smooth3** | **0.9474** | **0.9356** | **+0.012** | **Consistent** |
-| E17 — B, no smooth | 0.7837 | 0.9569 | −0.173 | **Overfit** |
-| E14 — +Selected | 0.9375 | 0.8957 | +0.042 | Moderate |
-
-E15 has the smallest absolute gap (+0.012), indicating excellent generalization. E17 shows a large negative gap (−0.173), meaning train F1 is far lower than test — a symptom of threshold instability rather than classic overfitting, but still undesirable for deployment. XGBoost-based models (A, B) are consistently well-behaved (|Δ| < 0.02), while any configuration including LightGBM shows mild degradation.
-
-### 5.8 Strengths
+### 5.3 Strengths
 
 - **Robust ranking** across all splits: AUC-PR ≥ 0.98 for E15 on both validation and hold-out test.
 - **Explicit temporal modeling** without fragile end-to-end sequence training — simple feature engineering + score smoothing.
@@ -328,44 +223,23 @@ E15 has the smallest absolute gap (+0.012), indicating excellent generalization.
 - **Single model for both tasks**: satisfies project constraints and eases maintenance.
 - **Consistent across train/val/test**: E15 shows the smallest F1 gap among all top configurations.
 
-### 5.9 Limitations
+### 5.4 Limitations
 
 1. **Scarce training anomalies** (270 in the fit segment) cap model capacity; metrics have inherent variance.
 2. **Distribution shift** between early train (0.21% anomaly rate) and later val/test (~4.5%) makes threshold calibration sensitive.
 3. **Internal test ≠ course test** — metrics above are on a temporal slice of `train.csv`; instructor-held labels on `test_simple` / `test_complex` may differ.
-4. **Task 2 uncertainty** — if complex anomalies differ from training patterns, the fixed threshold cannot adapt.
-5. **No segment-level loss** — we optimize per-step F1, not explicit contiguous anomaly regions.
+4. **Task 2** — the same fixed threshold cannot adapt if complex anomalies differ from training patterns (submission positive rate: 3.35% on `test_simple`, 1.67% on `test_complex`).
+5. **Per-step objective** — F1 is optimized at each time step, not over contiguous anomaly segments.
 
-### 5.10 Reproducibility
-
-Full ablation study (17 configurations):
+### 5.5 Reproducibility
 
 ```bash
-python code/experiment_v5.py    # ~66 seconds on CPU
+python code/experiment_v5.py   # full ablation (~66 s on CPU)
+python code/train_final.py     # train E15, save submission_v5/model.pkl
+python code/predict_final.py   # evaluate on internal splits
 ```
 
-Train the selected model and generate submission files:
-
-```bash
-python code/train_final.py      # train XGBoost reweighted + select threshold on Val
-```
-
-Evaluate on internal train/val/test splits:
-
-```bash
-python code/predict_final.py
-```
-
-All outputs are written to `submission_v5/`. The log `experiment_v5_log.txt` contains the full training output from a clean run.
-
-**Submission-level prediction rates (selected model):**
-
-| Task | Predicted positives | Total rows | Rate |
-|:----:|:------------------:|:----------:|:----:|
-| Task 1 (`test_simple`) | 858 | 25,647 | 3.35% |
-| Task 2 (`test_complex`) | 576 | 34,542 | 1.67% |
-
-These rates are consistent with earlier versions using multi-model ensembles (v3: 3.44% / 1.68%, v4: 3.34% / 1.86%), confirming that the single-model pipeline achieves equivalent behavior with far less complexity.
+See `experiment_v5_log.txt` for a complete run log.
 
 ---
 
@@ -376,5 +250,3 @@ These rates are consistent with earlier versions using multi-model ensembles (v3
 | **唐宇奥 (Tang Yu'ao)** | Model development through successive version iterations (v1–v4): PCA-based preprocessing, hybrid/ensemble models (e.g., combining gradient boosting with Isolation Forest) |
 | **黄涵幸 (Huang Hanxing)** | Train / validation / test split design; ablation studies and configuration comparison; report |
 | **龙泽鑫 (Long Zexin)** | Ablation studies and configuration comparison; final model selection (E15) and training; report |
-
-The final v5 model was chosen from the ablation results. Earlier version iterations (v1–v4) supplied the modeling ideas that were later compared and refined in the ablation phase. The ablation study (17 configurations) was conducted collaboratively by the full team, with each member contributing to experimental design, result analysis, and documentation.
