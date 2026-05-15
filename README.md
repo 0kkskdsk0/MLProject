@@ -1,43 +1,39 @@
 # MLProject：时序异常检测 — v5 最终版
 
-面向时序数据的异常检测任务。给定带标签的训练集 `train.csv` 和两个无标签测试集 `test_simple.csv`、`test_complex.csv`，训练模型并输出二值异常预测 `y_pred`。
+面向时序数据的异常检测任务。最终模型 **E15: XGBoost Focal + 时序平滑窗口 3**。
 
-**数据规模**：`train.csv` 137,192 行 / `test_simple.csv` 25,647 行 / `test_complex.csv` 34,542 行
+**数据规模**: `train.csv` 137,192 行 / `test_simple.csv` 25,647 行 / `test_complex.csv` 34,542 行
 
 ## 仓库结构
 
 ```
 MLProject/
 ├── code/
-│   └── experiment_v5.py          # 训练脚本（v5 消融实验，17组配置）
-├── data/                         # 原始数据
+│   └── experiment_v5.py       # 训练脚本（消融实验 + 最终模型）
+├── data/                      # 原始数据
 ├── docs/
-│   └── experiment_v5_report.md   # 详细实验报告
-├── submission_v5/                # v5 产物与报告
-├── experiment_v5_log.txt         # 训练日志
-├── Project.pdf                   # 题目说明
+│   └── experiment_v5_report.md # 最终实验报告（含完整分析）
+├── submission_v5/             # 输出产物目录
+├── experiment_v5_log.txt      # 训练日志
+├── Project.pdf                # 题目说明
 └── README.md
 ```
 
-## 核心方法
+## 最终模型：E15
 
-**XGBoost Focal 单模型** — 消融实验表明多模型集成冗余。
+| 组件 | 内容 |
+|------|------|
+| 基模型 | XGBoost Focal (depth=5, lr=0.03, scale_pos_weight=480) |
+| 后处理 | 时序平滑，窗口 3 |
+| 阈值 | 0.0061（Val 最大化 F1） |
 
-特征工程（310维）：
-- 原始 33 维特征
-- 滚动窗口 (5/10/20) 均值与标准差
-- 一阶/五阶差分特征
-- 滞后特征 (lag1, lag3)
-- 前 3 特征两两交互
-- 行统计量 (mean, std, max, min)
+| 数据集 | AUC-PR | F1 | FP | FN |
+|--------|:------:|:--:|:--:|:--:|
+| Train | 1.0000 | 0.9474 | 30 | 0 |
+| Val | 0.9830 | 0.9375 | 7 | 15 |
+| **Test** | **0.9891** | **0.9356** | **4** | **11** |
 
-## 结果摘要
-
-| 配置 | AUC-PR | F1 | FP | FN |
-|------|:------:|:--:|:--:|:--:|
-| **E15 B + smooth3（推荐）** | **0.9891** | **0.9356** | **4** | **11** |
-| E17 B + nosmooth（备选） | 0.9974 | 0.9569 | 1 | 9 |
-| E2 B 单模型 | 0.9825 | 0.9333 | 8 | 8 |
+详细分析见 [`docs/experiment_v5_report.md`](docs/experiment_v5_report.md)。
 
 ## 使用
 
@@ -46,4 +42,9 @@ cd MLProject
 python code/experiment_v5.py
 ```
 
-详细结果见 `docs/experiment_v5_report.md`。
+依赖: `pandas numpy scikit-learn xgboost lightgbm`
+
+## 核心结论
+
+在 270 个异常样本的极度不平衡场景下，**简单模型 + 正确参数远优于复杂集成**。
+XGBoost Focal 单模型经窗口 3 平滑后，三集指标高度一致（F1 Δ≤0.012），是最终推荐方案。
