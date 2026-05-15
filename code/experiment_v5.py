@@ -1,5 +1,5 @@
 """
-Experiment: IF-free ablation with multiple weight variants
+Experiment v5: IF-free ablation with multiple weight variants
 Model pool: A=XGBstd, B=XGBfocal, C=LGB, D=XGBsel, E=LGBsel
 
 FIXED DATA SPLIT: train on tr[:130816], threshold on va[130816:134545], test on te[134545:].
@@ -123,108 +123,43 @@ log('Computing predictions...')
 px = lambda m, X: m.predict(xgb.DMatrix(X))
 pl = lambda m, X: m.predict(X)
 
-# Train set predictions (used only for training, not eval)
-# Val set predictions (for threshold selection and comparison)
-pa_val = px(A, X_val)
-pb_val = px(B, X_val)
-pc_val = pl(C, X_val)
-pd_val = px(D, X_val_sel)
-pe_val = pl(E, X_val_sel)
+def get_preds(X, X_sel):
+    return {
+        'A': px(A, X), 'B': px(B, X), 'C': pl(C, X),
+        'D': px(D, X_sel), 'E': pl(E, X_sel),
+    }
 
-# Test set predictions
-pa_test = px(A, X_test)
-pb_test = px(B, X_test)
-pc_test = pl(C, X_test)
-pd_test = px(D, X_test_sel)
-pe_test = pl(E, X_test_sel)
-
-# Train set predictions (for overfitting check)
-pa_train = px(A, X_train)
-pb_train = px(B, X_train)
-pc_train = pl(C, X_train)
-pd_train = px(D, X_train_sel)
-pe_train = pl(E, X_train_sel)
+p_train = get_preds(X_train, X_train_sel)
+p_val   = get_preds(X_val, X_val_sel)
+p_test  = get_preds(X_test, X_test_sel)
 
 def temporal_smooth(s, w=5):
     k = np.ones(w)/w
     return np.convolve(s, k, mode='same')
 
 # === EXPERIMENT CONFIGS ===
-# Using val predictions for threshold selection and ranking
-experiments_val = [
-    ('E1  A (XGB std)', lambda: pa_val, True),
-    ('E2  B (XGB focal)', lambda: pb_val, True),
-    ('E3  C (LGB)', lambda: pc_val, True),
-    ('E4  A+B 0.5+0.5', lambda: 0.5*pa_val+0.5*pb_val, True),
-    ('E5  A+B 0.7+0.3', lambda: 0.7*pa_val+0.3*pb_val, True),
-    ('E6  A+B 0.3+0.7', lambda: 0.3*pa_val+0.7*pb_val, True),
-    ('E7  A+C 0.5+0.5', lambda: 0.5*pa_val+0.5*pc_val, True),
-    ('E8  B+C 0.5+0.5', lambda: 0.5*pb_val+0.5*pc_val, True),
-    ('E9  A+C 0.7+0.3', lambda: 0.7*pa_val+0.3*pc_val, True),
-    ('E10 A+B+C 0.34+0.33+0.33', lambda: 0.34*pa_val+0.33*pb_val+0.33*pc_val, True),
-    ('E11 A+B+C 0.5+0.25+0.25', lambda: 0.5*pa_val+0.25*pb_val+0.25*pc_val, True),
-    ('E12 A+B+C 0.2+0.4+0.4', lambda: 0.2*pa_val+0.4*pb_val+0.4*pc_val, True),
-    ('E13 0.8*E10+0.2*sel', lambda: 0.8*(0.34*pa_val+0.33*pb_val+0.33*pc_val)+0.2*(0.5*pd_val+0.5*pe_val), True),
-    ('E14 0.8*E4+0.2*sel', lambda: 0.8*(0.5*pa_val+0.5*pb_val)+0.2*(0.5*pd_val+0.5*pe_val), True),
+experiments = [
+    ('E1  A (XGB std)',                lambda p: p['A'], True),
+    ('E2  B (XGB focal)',              lambda p: p['B'], True),
+    ('E3  C (LGB)',                    lambda p: p['C'], True),
+    ('E4  A+B 0.5+0.5',               lambda p: 0.5*p['A']+0.5*p['B'], True),
+    ('E5  A+B 0.7+0.3',               lambda p: 0.7*p['A']+0.3*p['B'], True),
+    ('E6  A+B 0.3+0.7',               lambda p: 0.3*p['A']+0.7*p['B'], True),
+    ('E7  A+C 0.5+0.5',               lambda p: 0.5*p['A']+0.5*p['C'], True),
+    ('E8  B+C 0.5+0.5',               lambda p: 0.5*p['B']+0.5*p['C'], True),
+    ('E9  A+C 0.7+0.3',               lambda p: 0.7*p['A']+0.3*p['C'], True),
+    ('E10 A+B+C 0.34+0.33+0.33',      lambda p: 0.34*p['A']+0.33*p['B']+0.33*p['C'], True),
+    ('E11 A+B+C 0.5+0.25+0.25',       lambda p: 0.5*p['A']+0.25*p['B']+0.25*p['C'], True),
+    ('E12 A+B+C 0.2+0.4+0.4',         lambda p: 0.2*p['A']+0.4*p['B']+0.4*p['C'], True),
+    ('E13 0.8*E10+0.2*sel',           lambda p: 0.8*(0.34*p['A']+0.33*p['B']+0.33*p['C'])+0.2*(0.5*p['D']+0.5*p['E']), True),
+    ('E14 0.8*E4+0.2*sel',            lambda p: 0.8*(0.5*p['A']+0.5*p['B'])+0.2*(0.5*p['D']+0.5*p['E']), True),
 ]
 
-# Corresponding test score functions (same weights, test data)
-experiments_test = [
-    ('E1  A (XGB std)', lambda: pa_test),
-    ('E2  B (XGB focal)', lambda: pb_test),
-    ('E3  C (LGB)', lambda: pc_test),
-    ('E4  A+B 0.5+0.5', lambda: 0.5*pa_test+0.5*pb_test),
-    ('E5  A+B 0.7+0.3', lambda: 0.7*pa_test+0.3*pb_test),
-    ('E6  A+B 0.3+0.7', lambda: 0.3*pa_test+0.7*pb_test),
-    ('E7  A+C 0.5+0.5', lambda: 0.5*pa_test+0.5*pc_test),
-    ('E8  B+C 0.5+0.5', lambda: 0.5*pb_test+0.5*pc_test),
-    ('E9  A+C 0.7+0.3', lambda: 0.7*pa_test+0.3*pc_test),
-    ('E10 A+B+C 0.34+0.33+0.33', lambda: 0.34*pa_test+0.33*pb_test+0.33*pc_test),
-    ('E11 A+B+C 0.5+0.25+0.25', lambda: 0.5*pa_test+0.25*pb_test+0.25*pc_test),
-    ('E12 A+B+C 0.2+0.4+0.4', lambda: 0.2*pa_test+0.4*pb_test+0.4*pc_test),
-    ('E13 0.8*E10+0.2*sel', lambda: 0.8*(0.34*pa_test+0.33*pb_test+0.33*pc_test)+0.2*(0.5*pd_test+0.5*pe_test)),
-    ('E14 0.8*E4+0.2*sel', lambda: 0.8*(0.5*pa_test+0.5*pb_test)+0.2*(0.5*pd_test+0.5*pe_test)),
-]
-
-# Corresponding train score functions (same weights, train data)
-experiments_train = [
-    ('E1  A (XGB std)', lambda: pa_train),
-    ('E2  B (XGB focal)', lambda: pb_train),
-    ('E3  C (LGB)', lambda: pc_train),
-    ('E4  A+B 0.5+0.5', lambda: 0.5*pa_train+0.5*pb_train),
-    ('E5  A+B 0.7+0.3', lambda: 0.7*pa_train+0.3*pb_train),
-    ('E6  A+B 0.3+0.7', lambda: 0.3*pa_train+0.7*pb_train),
-    ('E7  A+C 0.5+0.5', lambda: 0.5*pa_train+0.5*pc_train),
-    ('E8  B+C 0.5+0.5', lambda: 0.5*pb_train+0.5*pc_train),
-    ('E9  A+C 0.7+0.3', lambda: 0.7*pa_train+0.3*pc_train),
-    ('E10 A+B+C 0.34+0.33+0.33', lambda: 0.34*pa_train+0.33*pb_train+0.33*pc_train),
-    ('E11 A+B+C 0.5+0.25+0.25', lambda: 0.5*pa_train+0.25*pb_train+0.25*pc_train),
-    ('E12 A+B+C 0.2+0.4+0.4', lambda: 0.2*pa_train+0.4*pb_train+0.4*pc_train),
-    ('E13 0.8*E10+0.2*sel', lambda: 0.8*(0.34*pa_train+0.33*pb_train+0.33*pc_train)+0.2*(0.5*pd_train+0.5*pe_train)),
-    ('E14 0.8*E4+0.2*sel', lambda: 0.8*(0.5*pa_train+0.5*pb_train)+0.2*(0.5*pd_train+0.5*pe_train)),
-]
-
-# === RANK ON VAL (NO SMOOTHING) ===
-log('')
-log('Ranking on Val (no temporal smooth)...')
-val_basic = []
-for (name, fn, _), (tname, tfn) in zip(experiments_val[:14], experiments_test[:14]):
-    scores = fn()
-    apr = average_precision_score(y_val, scores)
-    val_basic.append((name, apr, scores, tfn))
-
-val_basic.sort(key=lambda x: x[1], reverse=True)
-best_val_name, best_val_apr, best_val_scores, best_test_fn = val_basic[0]
-log(f'Best on Val: {best_val_name.strip()} (Val AUC-PR={best_val_apr:.4f})')
-
-# === THRESHOLD SELECTION ON VAL ===
 def select_threshold(scores, y_true):
     prec, rec, thrs = precision_recall_curve(y_true, scores)
     f1s = 2*prec*rec/(prec+rec+1e-10)
     best = np.argmax(f1s)
     thresh = thrs[min(best, len(thrs)-1)] if best < len(thrs) else 0.5
-    # Select threshold that maximizes F1 on VAL
-    pred = (scores >= thresh).astype(int)
     return thresh
 
 def full_metrics(scores, y_true, threshold):
@@ -235,111 +170,123 @@ def full_metrics(scores, y_true, threshold):
         'prec': precision_score(y_true, pred, zero_division=0),
         'rec': recall_score(y_true, pred),
         'f1': f1_score(y_true, pred),
-        'fp': ((pred==1)&(y_true==0)).sum(),
-        'fn': ((pred==0)&(y_true==1)).sum(),
-        'pred_anom': pred.sum(),
-        'threshold': threshold,
+        'fp': int(((pred==1)&(y_true==0)).sum()),
+        'fn': int(((pred==0)&(y_true==1)).sum()),
+        'pred_anom': int(pred.sum()),
     }
 
-# === FULL EVALUATION ===
-log('')
-log('='*70)
-log('FULL RESULTS')
-log('='*70)
-log('Threshold selected on Val (max F1). Metrics reported on Train, Val, Test.')
-log('')
+# === EVALUATE ALL CONFIGS ===
+log('Evaluating configs...')
+results = []
 
-all_results = []
+for name, fn, do_smooth in experiments:
+    s_val_raw = fn(p_val)
+    s_train_raw = fn(p_train)
+    s_test_raw = fn(p_test)
 
-for (name, fn_val, do_smooth), (tname, fn_test), (trname, fn_train) in zip(experiments_val[:14], experiments_test[:14], experiments_train[:14]):
-    # Val scores with smoothing
-    s_val = temporal_smooth(fn_val(), 5) if do_smooth else fn_val()
-    # Select threshold on Val
+    s_val = temporal_smooth(s_val_raw, 5) if do_smooth else s_val_raw
     thresh = select_threshold(s_val, y_val)
-    # Test scores (same config)
-    s_test = fn_test()
-    if do_smooth:
-        s_test = temporal_smooth(s_test, 5)
-    # Train scores (same config, same threshold)
-    s_train = fn_train()
-    if do_smooth:
-        s_train = temporal_smooth(s_train, 5)
 
-    vm = full_metrics(s_val, y_val, thresh)
-    tm = full_metrics(s_test, y_test, thresh)
-    trm = full_metrics(s_train, y_train, thresh)
-    all_results.append({'name': name, 'val': vm, 'test': tm, 'train': trm})
+    s_train = temporal_smooth(s_train_raw, 5) if do_smooth else s_train_raw
+    s_test  = temporal_smooth(s_test_raw, 5) if do_smooth else s_test_raw
 
-# Also evaluate best config with post-processing variants (E15-E17)
-def add_pp_variants(val_scores, test_fn_base, train_fn_base, config_label, all_results):
-    for pp_name, smooth_w in [
-        (f'E15 {config_label}+smooth3', 3),
-        (f'E16 {config_label}+smooth7', 7),
-        (f'E17 {config_label}+nosmooth', None),
-    ]:
-        s_val_pp = temporal_smooth(val_scores, smooth_w) if smooth_w else val_scores
-        thresh = select_threshold(s_val_pp, y_val)
-        s_test_pp = temporal_smooth(test_fn_base(), smooth_w) if smooth_w else test_fn_base()
-        s_train_pp = temporal_smooth(train_fn_base(), smooth_w) if smooth_w else train_fn_base()
-        vm = full_metrics(s_val_pp, y_val, thresh)
-        tm = full_metrics(s_test_pp, y_test, thresh)
-        trm = full_metrics(s_train_pp, y_train, thresh)
-        all_results.append({'name': pp_name, 'val': vm, 'test': tm, 'train': trm})
+    results.append({
+        'name': name,
+        'val': full_metrics(s_val, y_val, thresh),
+        'test': full_metrics(s_test, y_test, thresh),
+        'train': full_metrics(s_train, y_train, thresh),
+        'threshold': thresh,
+    })
 
-best_config_label = best_val_name.strip()
-# Find the matching test function for the best config
-best_test_fn = None
-best_train_fn = None
-for (name, fn_val, _), (tname, fn_test), (trname, fn_train) in zip(experiments_val[:14], experiments_test[:14], experiments_train[:14]):
-    if name == best_val_name:
-        best_test_fn = fn_test
-        best_train_fn = fn_train
+# Add post-processing variants for best basic config
+best_basic = max(results, key=lambda r: r['val']['aucpr'])
+best_label = best_basic['name'].strip()
+best_fn = None
+for n, fn, _ in experiments:
+    if n == best_basic['name']:
+        best_fn = fn
         break
 
-if best_test_fn:
-    add_pp_variants(best_val_scores, best_test_fn, best_train_fn, best_config_label, all_results)
+if best_fn:
+    s_val_raw = best_fn(p_val)
+    s_train_raw = best_fn(p_train)
+    s_test_raw = best_fn(p_test)
 
-# Sort by Val AUC-PR (the honest comparison metric)
-all_results.sort(key=lambda x: x['val']['aucpr'], reverse=True)
+    for pp_name, sw in [
+        (f'E15 {best_label}+smooth3', 3),
+        (f'E16 {best_label}+smooth7', 7),
+        (f'E17 {best_label}+nosmooth', None),
+    ]:
+        s_val_pp = temporal_smooth(s_val_raw, sw) if sw else s_val_raw
+        thresh_pp = select_threshold(s_val_pp, y_val)
+        s_train_pp = temporal_smooth(s_train_raw, sw) if sw else s_train_raw
+        s_test_pp  = temporal_smooth(s_test_raw, sw) if sw else s_test_raw
+        results.append({
+            'name': pp_name,
+            'val': full_metrics(s_val_pp, y_val, thresh_pp),
+            'test': full_metrics(s_test_pp, y_test, thresh_pp),
+            'train': full_metrics(s_train_pp, y_train, thresh_pp),
+            'threshold': thresh_pp,
+        })
 
+# Sort by Val AUC-PR
+results.sort(key=lambda r: r['val']['aucpr'], reverse=True)
+
+# === PRINT REPORT ===
 print()
-print('--- TRAIN METRICS (overfitting check, threshold from Val) ---')
-print(f'{"Rank":<5} {"Exp":<35} {"AUC-PR":<10} {"Acc":<8} {"F1":<8} {"FP":<6} {"FN":<6} {"Pred":<7}')
-print('-' * 85)
-for i, r in enumerate(all_results, 1):
-    tr = r['train']
-    print(f'{i:<5} {r["name"]:<35} {tr["aucpr"]:<10.4f} {tr["acc"]:<8.4f} {tr["f1"]:<8.4f} {tr["fp"]:<6} {tr["fn"]:<6} {tr["pred_anom"]:<3}/{len(y_train):<3}')
+print('=' * 100)
+print('  Experiment v5 Results')
+print('  Data: Train={} rows, Val={} rows, Test={} rows'.format(len(tr), len(va), len(te)))
+print(f'  Train anomalies: {y_train.sum()}/{len(y_train)} | Val: {y_val.sum()}/{len(y_val)} | Test: {y_test.sum()}/{len(y_test)}')
+print('=' * 100)
 
+# Train
 print()
-print('--- VAL METRICS (ranking basis) ---')
-print(f'{"Rank":<5} {"Exp":<35} {"AUC-PR":<10} {"Acc":<8} {"F1":<8} {"FP":<6} {"FN":<6}')
-print('-' * 78)
-for i, r in enumerate(all_results, 1):
-    v = r['val']
-    print(f'{i:<5} {r["name"]:<35} {v["aucpr"]:<10.4f} {v["acc"]:<8.4f} {v["f1"]:<8.4f} {v["fp"]:<6} {v["fn"]:<6}')
-
-print()
-print('--- TEST METRICS (final) ---')
+print('--- TRAIN METRICS (threshold from Val) ---')
 print(f'{"Rank":<5} {"Exp":<35} {"AUC-PR":<10} {"Acc":<8} {"F1":<8} {"Prec":<8} {"Rec":<8} {"FP":<6} {"FN":<6} {"Pred":<7}')
-print('-' * 105)
-for i, r in enumerate(all_results, 1):
+print('-' * 96)
+for i, r in enumerate(results, 1):
+    t = r['train']
+    print(f'{i:<5} {r["name"]:<35} {t["aucpr"]:<10.4f} {t["acc"]:<8.4f} {t["f1"]:<8.4f} {t["prec"]:<8.4f} {t["rec"]:<8.4f} {t["fp"]:<6} {t["fn"]:<6} {t["pred_anom"]:<3}/{len(y_train):<3}')
+
+# Val
+print()
+print('--- VAL METRICS (ranking basis, threshold selected on Val) ---')
+print(f'{"Rank":<5} {"Exp":<35} {"AUC-PR":<10} {"Acc":<8} {"F1":<8} {"Prec":<8} {"Rec":<8} {"FP":<6} {"FN":<6} {"Pred":<7}')
+print('-' * 96)
+for i, r in enumerate(results, 1):
+    v = r['val']
+    print(f'{i:<5} {r["name"]:<35} {v["aucpr"]:<10.4f} {v["acc"]:<8.4f} {v["f1"]:<8.4f} {v["prec"]:<8.4f} {v["rec"]:<8.4f} {v["fp"]:<6} {v["fn"]:<6} {v["pred_anom"]:<3}/{len(y_val):<3}')
+
+# Test
+print()
+print('--- TEST METRICS (final hold-out) ---')
+print(f'{"Rank":<5} {"Exp":<35} {"AUC-PR":<10} {"Acc":<8} {"F1":<8} {"Prec":<8} {"Rec":<8} {"FP":<6} {"FN":<6} {"Pred":<7}')
+print('-' * 96)
+for i, r in enumerate(results, 1):
     t = r['test']
     print(f'{i:<5} {r["name"]:<35} {t["aucpr"]:<10.4f} {t["acc"]:<8.4f} {t["f1"]:<8.4f} {t["prec"]:<8.4f} {t["rec"]:<8.4f} {t["fp"]:<6} {t["fn"]:<6} {t["pred_anom"]:<3}/{len(y_test):<3}')
 
-winner = all_results[0]
+# Summary
 print()
-log('='*70)
-log('FINAL RESULT (honest evaluation)')
-log('='*70)
-w = winner['test']
-tr = winner['train']
-v = winner['val']
-log(f'Best config: {winner["name"].strip()}')
-log(f'  Threshold (from Val): {winner["val"]["threshold"]:.4f}')
-log(f'  Train AUC-PR: {tr["aucpr"]:.4f}  Train F1: {tr["f1"]:.4f}  Train Acc: {tr["acc"]:.4f}')
-log(f'  Val   AUC-PR: {v["aucpr"]:.4f}  Val F1:   {v["f1"]:.4f}  Val Acc:   {v["acc"]:.4f}')
-log(f'  Test  AUC-PR: {w["aucpr"]:.4f}  Test F1:  {w["f1"]:.4f}  Test Acc:  {w["acc"]:.4f}')
-log(f'  Test FP: {w["fp"]}  FN: {w["fn"]}')
-log(f'')
+print('=' * 100)
+print('  SUMMARY')
+print('=' * 100)
+for i, r in enumerate(results[:5], 1):
+    tr = r['train']; v = r['val']; t = r['test']
+    print(f'  #{i}: {r["name"].strip()}')
+    print(f'      Threshold = {r["threshold"]:.4f}')
+    print(f'      Train: AUC-PR={tr["aucpr"]:.4f}  F1={tr["f1"]:.4f}  FP={tr["fp"]}  FN={tr["fn"]}')
+    print(f'      Val:   AUC-PR={v["aucpr"]:.4f}  F1={v["f1"]:.4f}  FP={v["fp"]}  FN={v["fn"]}')
+    print(f'      Test:  AUC-PR={t["aucpr"]:.4f}  F1={t["f1"]:.4f}  FP={t["fp"]}  FN={t["fn"]}')
+    print()
+
+# Overfitting analysis
+print('--- OVERFITTING CHECK (Train F1 - Test F1 delta) ---')
+for r in results:
+    delta = r['train']['f1'] - r['test']['f1']
+    flag = ' *** OVERFIT' if delta > 0.05 else ''
+    print(f'  {r["name"]:<35} Train F1={r["train"]["f1"]:.4f}  Test F1={r["test"]["f1"]:.4f}  Delta={delta:+.4f}{flag}')
+
 log(f'Total time: {time.time()-t_start:.0f}s')
 log('DONE')

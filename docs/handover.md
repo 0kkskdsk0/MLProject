@@ -1,8 +1,8 @@
 # Robust Anomaly Detection in Noisy Time-Series Data - 技术交接文档
 
 **仓库路径**: `G:\MLProject\MLProject`  
-**最后更新**: 2026-05-13  
-**当前建议阅读顺序**: 先看本文档，再大致浏览 `notebooks/`理解v3v4版本模型构建细节，最后按需要进入 `code/` 和 `validation/`
+**最后更新**: 2026-05-15  
+**当前建议阅读顺序**: 先看本文档，然后看 `docs/experiment_v5_report.md` 了解最新结论，再按需要查看 `code/` 和 `submission_v5/`
 
 ---
 
@@ -149,7 +149,7 @@ MLProject/
 - LOF/PCA 原逻辑在 CV 前全局拟合，存在信息泄露风险
 - 因此它是“思路保留版”，不是当前可信版本，如果需要增加合理的regime特征可以优先在该版本上开刀
 
-### 4.4 v4_NoRegime 当前最优版本
+### 4.4 v4_NoRegime 版本
 
 - **脚本**: `code/train_predict_v4_NoRegime.py`
 - **输出目录**: `submission_v4_NoRegime/`
@@ -184,6 +184,38 @@ MLProject/
   - 每个 CV fold 只在该 fold 的训练切分上拟合
   - 最终模型只在最终训练段上拟合
 - 这样避免验证集或测试集信息参与特征变换器训练
+
+### 4.5 v5 消融实验（最终推荐）
+
+- **脚本**: `code/experiment_v5.py`
+- **输出目录**: `submission_v5/`
+- **定位**: **当前推荐版本**。系统消融实验表明多模型集成冗余，XGBoost Focal 单模型最优。
+
+特征工程：
+- 310 维特征（rolling stats + diff + lag + interaction + row stats）
+- 无 IForest、无 LOF、无 PCA、无 regime_id
+
+模型池（5 个基模型用于消融对比）：
+- A: XGBoost 标准（depth=6, lr=0.05, 2000 轮）
+- B: **XGBoost Focal**（depth=5, lr=0.03, scale_pos_weight×2, 1500 轮）
+- C: LightGBM（2000 轮）
+- D: XGBoost Selected（top-100 特征）
+- E: LightGBM Selected（top-100 特征）
+
+关键发现：
+1. **XGBoost Focal 单模型最优** — 无需集成、无需特征选择
+2. **LightGBM 过拟合** — 单独使用 Val AUC-PR 仅 0.55
+3. **Selected 子模型无增益** — 额外复杂度无价值
+4. **时间平滑窗口 3 最稳定** — 三集指标一致，无过拟合
+
+最佳配置：
+
+| 配置 | Test AUC-PR | Test F1 | FP | FN |
+|------|:-----------:|:-------:|:--:|:--:|
+| **E15 B + smooth3（推荐）** | **0.9891** | **0.9356** | **4** | **11** |
+| E17 B + nosmooth（备选） | 0.9974 | 0.9569 | 1 | 9 |
+
+详细结果见 `docs/experiment_v5_report.md`。
 
 ---
 
@@ -240,6 +272,16 @@ MLProject/
 补充：
 - 结果摘要见 `docs/v4result.md`
 - 当前 `model.pkl` 已确认 `feature_count = 316` 且不含 `regime_id`
+
+### 5.4 v5（当前推荐）
+
+- 数据集切分方式
+  - Train: `[:130816]` 含 270 个异常
+  - Val: `[130816:134545]` 含 180 个异常（阈值选择）
+  - Test: `[134545:]` 含 120 个异常（仅评估）
+- **E15 B + smooth3**: Test AUC-PR = `0.9891`, F1 = `0.9356`, FP=4, FN=11
+- **E17 B 无平滑**: Test AUC-PR = `0.9974`, F1 = `0.9569`, FP=1, FN=9
+- 模型：XGBoost Focal 单模型（depth=5, lr=0.03, scale_pos_weight=480）
 
 ---
 
@@ -319,31 +361,31 @@ MLProject/
 ### 9.1 如果你想继续优化模型
 
 优先从：
-- `code/train_predict_v4_NoRegime.py`
-- `submission_v4_NoRegime`
+- `code/experiment_v5.py`
+- `submission_v5/`
 
 原因：
 - 当前最好版本
-- 可以尝试添加合理的regime特征
+- 结构最简单（单模型），便于分析和改进
 
 ### 9.2 如果你想要最稳的 baseline
 
 优先使用：
-- `code/train_predict_v3_fast.py`
-- `submission_v3/`
+- `code/experiment_v5.py` — 推荐配置 E15 (XGBoost Focal + smooth3)
+- `submission_v5/`
 
 原因：
-- 结构简单
-- 结果稳定
-- 更容易解释和写报告
+- 结构最简单（单模型）
+- 三集指标一致，无过拟合
+- 容易解释和写报告
 
 ### 9.3 如果你要做对照实验
 
 建议的最小对照组：
 - v2 baseline
-- 当前 v3_fast
-- 当前 no-regime v4
-- 如有必要，再加入 `v4_Regime` 说明风险版本(regime特征在训练集和验证集语义不对齐)
+- v3_fast
+- v4_NoRegime
+- v5（单模型最强基线）
 
 ---
 
@@ -355,14 +397,10 @@ MLProject/
 - 不要只依赖最后一个短验证段
 - 重点看指标方差，而不是只看单次最佳结果
 
-### P2. 精简 v4 结构
+### P2. 精简 v4 结构（v5 已完成）
 
-- 现在 v4 组件很多，复杂度偏高
-- 可以做逐项 ablation：
-  - 去掉 cascade
-  - 去掉 selected-feature 子模型
-  - 去掉 focal 分支
-- 观察哪些组件真正提供增益
+- v5 已系统性完成消融实验，结论是：去掉所有多余组件，XGBoost Focal 单模型最优
+- 见 `code/experiment_v5.py` 和 `docs/experiment_v5_report.md`
 
 ### P3. 报告友好的可解释性
 
@@ -374,10 +412,8 @@ MLProject/
 
 ## 11. 结论
 
-当前仓库里，**真正推荐继续推进的版本有两个**：
-- `train_predict_v3_fast.py`：当前稳健 baseline
-- `train_predict_v4_NoRegime.py`：当前主要实验版
+当前仓库里，**推荐使用的版本**：
+- `code/experiment_v5.py`：当前最优版本，XGBoost Focal 单模型
+- `submission_v5/`：对应产物与报告
 
-现在最重要的共识应该是：
-- 先基于 **no-regime** 版本做实验
-- 再讨论更复杂的后处理和集成结构是否真的带来收益
+v5 的核心结论：**更少就是更多**。在 270 个异常样本的极度不平衡场景下，简单模型+正确参数远优于复杂集成。
