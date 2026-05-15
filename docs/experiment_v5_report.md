@@ -114,6 +114,10 @@ Random cross-validation would leak future information. We use a **chronological 
 
 Anomalies cluster toward the **end** of the series; validation and test segments have much higher prevalence than the training segment. This mimics realistic deployment where recent regimes differ from distant history and stresses **temporal generalization**.
 
+![Distribution of labeled anomalies in train.csv by row index (time order)](img1.png)
+
+*Figure 1. Anomaly labels along the training sequence. Positive labels are rare overall and appear almost exclusively in the later indices (from roughly row 124,000 onward), which motivates a chronological split rather than random cross-validation.*
+
 The **test** segment is never used for training or threshold fitting.
 
 ### 4.2 Metrics
