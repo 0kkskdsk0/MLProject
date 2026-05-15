@@ -90,6 +90,8 @@ model = xgb.train({
     'seed': 42,
     'tree_method': 'hist',
 }, dt, 1500, evals=[(dt, 'train')], verbose_eval=100)
+# 注: 不设早停。Val 异常率(4.83%)远高于 Train(0.21%)，
+# 用 Val logloss 早停会过早截断训练。实际 1500 轮 + Val F1 阈值选择表现一致。
 
 # === 4. 阈值选择（Val 最大化 F1，加 smooth3）===
 log('Selecting threshold on Val...')
