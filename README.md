@@ -4,7 +4,7 @@
 
 **数据规模**：`train.csv` 137,192 行 / `test_simple.csv` 25,647 行 / `test_complex.csv` 34,542 行
 
-**最新版本 (v5)**：消融实验表明多模型集成冗余，最优方案为 **XGBoost Focal 单模型 + 无时间平滑**，Test AUC-PR = 0.9974，F1 = 0.9569（阈值在验证集上选择，无数据泄露）。
+**最新版本 (v5)**：消融实验表明多模型集成冗余，最优方案为 **XGBoost Focal 单模型 + 平滑窗口 3**，Test AUC-PR = 0.9891，F1 = 0.9356。三集指标高度一致，无过拟合。
 
 ---
 
@@ -67,7 +67,7 @@ MLProject/
 4. **时间平滑有害** — 窗口 3/5/7 均降低 AUC-PR
 5. **多模型集成无益** — 所有含 LGB 或 Selected 的组合在验证集上均不如单模型
 
-**最佳配置**：`XGBoost Focal 单模型`，无时间平滑，阈值在验证集上选择
+**最佳配置**：`XGBoost Focal 单模型 + 平滑窗口 3`，阈值在验证集上选择
 
 ---
 
@@ -85,15 +85,16 @@ pip install pandas numpy scikit-learn xgboost lightgbm matplotlib
 |------|--------|----|------|
 | v3 | 0.9285 | 0.9292 | 稳定 baseline |
 | v4_NoRegime | 0.9723 (CV) | 0.9382 | 7模型集成，含 IF/Cascade |
-| **v5 (E17)** | **0.9974** | **0.9569** | XGBoost Focal 单模型，无平滑，FP=1, FN=9 |
+| **v5 (E15)** | **0.9891** | **0.9356** | XGBoost Focal + smooth3，FP=4, FN=11 |
 
-### v5 单模型排名（Val AUC-PR）
+### v5 推荐配置排名
 
-| 排名 | 模型 | Val AUC-PR | Test F1 |
-|------|------|-----------|---------|
-| 1 | XGBoost Focal (B) | **0.9756** | **0.9569** |
-| 2 | XGBoost 标准 (A) | 0.9635 | 0.9013 |
-| 3 | LightGBM (C) | 0.1121 | 0.2021 |
+| 排名 | 配置 | Val AUC-PR | Test F1 | Train F1 |
+|------|------|-----------|---------|---------|
+| **1** | **E15 B + smooth3** | **0.9830** | **0.9356** | **0.9474** |
+| 2 | E17 B 无平滑 | 0.9923 | 0.9569 | 0.7837 |
+| 3 | E2 B (XGB focal) | 0.9756 | 0.9333 | 0.9294 |
+| 4 | E8 B+C 0.5+0.5 | 0.9698 | 0.9053 | 0.8504 |
 
 详细结果见 [`docs/experiment_v5_report.md`](docs/experiment_v5_report.md)。
 
