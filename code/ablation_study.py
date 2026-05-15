@@ -241,19 +241,19 @@ EXPERIMENTS = [
         'name': 'E1_xgb_std',
         'desc': 'XGBoost standard only',
         'models': ['xgb_std'],
-        'weights': None,
+        'weights': [1.0],
     },
     {
         'name': 'E2_lgb',
         'desc': 'LightGBM only',
         'models': ['lgb'],
-        'weights': None,
+        'weights': [1.0],
     },
     {
         'name': 'E3_iforest',
         'desc': 'Isolation Forest only',
         'models': ['iforest'],
-        'weights': None,
+        'weights': [1.0],
     },
     {
         'name': 'E4_xgb_lgb',
