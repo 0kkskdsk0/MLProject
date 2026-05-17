@@ -35,7 +35,7 @@ MLProject/
 | Val | 0.9830 | 0.9375 | 7 | 15 |
 | **Test** | **0.9891** | **0.9356** | **4** | **11** |
 
-详细分析见 [`docs/experiment_v5_report.md`](docs/experiment_v5_report.md)。
+详细分析见 [`docs/experiment_v5_report.md`](docs/24_HanxingHuang_report)。
 
 ## 使用
 
